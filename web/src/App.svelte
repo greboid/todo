@@ -4,6 +4,7 @@
   import TodoItem from './lib/TodoItem.svelte';
   import NewTodo from './lib/NewTodo.svelte';
   import BoardSwitcher from './lib/BoardSwitcher.svelte';
+  import FilterBar from './lib/FilterBar.svelte';
 
   const roots = $derived(store.visibleChildrenOf(null));
 
@@ -29,6 +30,7 @@
   <NewTodo placeholder="Add a top-level todo…" onAdd={onAddRoot} />
 
   <div class="list-toolbar">
+    <FilterBar />
     <label class="toggle">
       <input
         type="checkbox"
@@ -39,6 +41,13 @@
       {#if store.completedCount}<span class="count">({store.completedCount})</span>{/if}
     </label>
   </div>
+
+  {#if store.filterActive && roots.length === 0}
+    <div class="empty-filter">
+      <span class="muted">No todos match the current filter.</span>
+      <button class="ghost" onclick={() => store.clearFilter()}>Show all</button>
+    </div>
+  {/if}
 
   <ul
     class="roots"
@@ -87,6 +96,9 @@
   }
   .list-toolbar {
     padding: 0 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
   .toggle {
     display: inline-flex;
@@ -96,6 +108,14 @@
     font-size: 13px;
     cursor: pointer;
     user-select: none;
+  }
+  .empty-filter {
+    padding: 24px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--muted);
+    font-size: 13px;
   }
   .toggle input {
     accent-color: var(--accent);
