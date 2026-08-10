@@ -12,8 +12,8 @@
     store.load();
   });
 
-  async function onAddRoot(title) {
-    await store.create({ title });
+  async function onAddRoot(payload) {
+    await store.create(payload);
   }
 </script>
 

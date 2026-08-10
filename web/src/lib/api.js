@@ -45,6 +45,11 @@ export const api = {
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     return req('/schedule/parse', { method: 'POST', body: { text, today } });
   },
+  extractSchedule: (text) => {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return req('/schedule/extract', { method: 'POST', body: { text, today } });
+  },
   listLabels: () => req('/labels'),
   addPredefinedLabel: (name) => req('/labels/predefined', { method: 'POST', body: { name } }),
   removePredefinedLabel: (name) => req(`/labels/predefined/${encodeURIComponent(name)}`, { method: 'DELETE' }),
