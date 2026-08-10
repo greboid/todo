@@ -11,6 +11,7 @@ package schedule
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -669,6 +670,85 @@ func Parse(raw string, now time.Time) (Schedule, error) {
 	return Schedule{DueDate: dueDate}, nil
 }
 
+// QuickAdd is the parsed result of a quick-add line: a title, any #label tags,
+// and an optional trailing schedule.
+type QuickAdd struct {
+	Title    string
+	Labels   []string
+	Schedule Schedule
+}
+
+// Extract parses a quick-add line into a title, optional #label tags, and an
+// optional trailing schedule. #label tokens (single words, no spaces/commas)
+// are stripped first; the bare name without "#" is kept, de-duplicated
+// case-insensitively in first-seen order. The remaining text is then split into
+// title and schedule by scanning whitespace tokens left to right and taking the
+// first split point at which the trailing suffix parses as a due date /
+// recurrence, so the schedule is the longest trailing run and the title is
+// everything before it.
+//
+// Because the schedule grammar is anchored at the start (see Parse), a
+// candidate suffix parses only when the schedule phrase begins on its first
+// token — leading title words never produce a false match. parseMonthDayPhrase
+// ignores tokens after a valid month/day, so a candidate is accepted only when
+// removing its last token changes or invalidates the parse; that rejects
+// lenient matches such as "aug 15 milk" where "milk" would otherwise be
+// silently dropped from the title.
+//
+// ok is false when the title would be empty (blank input, or only labels).
+func Extract(raw string, now time.Time) (QuickAdd, bool) {
+	labels, body := stripLabels(raw)
+	if body == "" {
+		return QuickAdd{Labels: labels}, false
+	}
+	toks := strings.Fields(body)
+	for k := 1; k < len(toks); k++ {
+		s, err := Parse(strings.Join(toks[k:], " "), now)
+		if err != nil || (s.DueDate == "" && s.Recurrence == nil) {
+			continue
+		}
+		if len(toks)-k >= 2 {
+			s2, err2 := Parse(strings.Join(toks[k:len(toks)-1], " "), now)
+			if err2 == nil && sameSchedule(s, s2) {
+				continue // last token was ignored by the parser: trailing junk
+			}
+		}
+		return QuickAdd{Title: strings.Join(toks[:k], " "), Labels: labels, Schedule: s}, true
+	}
+	return QuickAdd{Title: body, Labels: labels}, true
+}
+
+// stripLabels removes #label tags from s, returning the de-duplicated label
+// names (without "#", first-seen order, case-insensitive) and the text with the
+// tags removed and spacing collapsed to single spaces.
+func stripLabels(s string) (labels []string, cleaned string) {
+	cleaned = reLabel.ReplaceAllStringFunc(s, func(m string) string {
+		name := m[1:] // drop the leading "#"
+		low := strings.ToLower(name)
+		for _, e := range labels {
+			if strings.ToLower(e) == low {
+				return "" // duplicate: drop, keep the first casing
+			}
+		}
+		labels = append(labels, name)
+		return ""
+	})
+	return labels, strings.TrimSpace(reSpaces.ReplaceAllString(cleaned, " "))
+}
+
+// sameSchedule reports whether two Schedules carry the same due date and
+// recurrence rule.
+func sameSchedule(a, b Schedule) bool {
+	if a.DueDate != b.DueDate {
+		return false
+	}
+	ar, br := a.Recurrence, b.Recurrence
+	if ar == nil || br == nil {
+		return ar == br
+	}
+	return reflect.DeepEqual(*ar, *br)
+}
+
 // ----------------------------------------------------------------------------
 // recurrence advance (date engine)
 // ----------------------------------------------------------------------------
@@ -1044,5 +1124,6 @@ var (
 	reEvery        = regexp.MustCompile(`^(ev|every)(!)?(?:\s+|$)`)
 	reBareKeywords = regexp.MustCompile(`^(daily|weekly|monthly|yearly|quarterly|fortnight|fortnightly|weekdays?|weekends?|workdays?)\b`)
 
+	reLabel  = regexp.MustCompile(`#([^\s#,]+)`)
 	reSpaces = regexp.MustCompile(`\s+`)
 )

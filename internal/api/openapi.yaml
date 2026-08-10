@@ -311,6 +311,33 @@ paths:
               schema: { $ref: "#/components/schemas/ScheduleParseResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/schedule/extract:
+    post:
+      tags: [Schedule]
+      operationId: extractSchedule
+      summary: Split quick-add text into title and optional schedule
+      description: >
+        Splits a quick-add string into a title, any `#label` tags, and an
+        optional trailing due date / recurrence. `#label` tokens (single words)
+        are pulled out as labels; the rest is split so the schedule is the
+        longest trailing run that parses (e.g. `Buy milk #errands tomorrow` →
+        title "Buy milk", label "errands", due tomorrow; `Pay rent every month
+        on the 1st` → title "Pay rent", monthly recurrence). Send the client's
+        local `today` (YYYY-MM-DD) so relative dates resolve from the user's
+        perspective. Always returns 200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleParseRequest" }
+      responses:
+        "200":
+          description: Extraction result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleExtractResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
 components:
   parameters:
     IdPath:
@@ -642,3 +669,28 @@ components:
         error:
           type: string
           description: Present when ok is false.
+
+    ScheduleExtractResponse:
+      type: object
+      required: [ok, title, labels]
+      properties:
+        ok:
+          type: boolean
+          description: Whether a non-empty title was produced (false for blank input or only labels).
+        title:
+          type: string
+          description: The title with labels and the trailing schedule removed; spacing collapsed.
+        labels:
+          type: array
+          items: { type: string }
+          description: "Parsed #label names (without the leading #); empty when none."
+        dueDate:
+          type: string
+          description: "YYYY-MM-DD of the trailing schedule; absent when none."
+        recurrence:
+          allOf:
+            - $ref: "#/components/schemas/Recurrence"
+          description: Parsed recurrence of the trailing schedule; absent when non-recurring.
+        scheduleText:
+          type: string
+          description: Canonical free-text rendering of the trailing schedule; absent when none.

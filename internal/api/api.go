@@ -95,6 +95,7 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/todos/{id}/move", h.moveTodo)
 	mux.HandleFunc("POST /api/todos/{id}/complete", h.completeTodo)
 	mux.HandleFunc("POST /api/schedule/parse", h.parseSchedule)
+	mux.HandleFunc("POST /api/schedule/extract", h.extractSchedule)
 	mux.HandleFunc("GET /api/labels", h.listLabels)
 	mux.HandleFunc("POST /api/labels/predefined", h.addPredefinedLabel)
 	mux.HandleFunc("DELETE /api/labels/predefined/{name}", h.removePredefinedLabel)
@@ -494,6 +495,43 @@ func (h *Handler) parseSchedule(w http.ResponseWriter, r *http.Request) {
 	resp := parseResponse{OK: true, DueDate: sched.DueDate, Recurrence: sched.Recurrence, ScheduleText: schedule.FormatSchedule(sched.DueDate, sched.Recurrence, now)}
 	if err != nil {
 		resp = parseResponse{OK: false, Error: err.Error()}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// extractSchedule splits a quick-add string into a title, any #label tags, and
+// an optional trailing due/recurrence. The client sends its local "today" so
+// relative dates resolve from the user's perspective. Always returns 200; ok
+// is false when the title would be empty (blank input or only labels).
+func (h *Handler) extractSchedule(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Text  string `json:"text"`
+		Today string `json:"today,omitempty"`
+	}
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	now := time.Now().UTC()
+	if in.Today != "" {
+		if t, err := time.Parse("2006-01-02", in.Today); err == nil {
+			now = t
+		}
+	}
+	qa, ok := schedule.Extract(in.Text, now)
+	type extractResponse struct {
+		OK           bool               `json:"ok"`
+		Title        string             `json:"title"`
+		Labels       []string           `json:"labels"`
+		DueDate      string             `json:"dueDate,omitempty"`
+		Recurrence   *models.Recurrence `json:"recurrence,omitempty"`
+		ScheduleText string             `json:"scheduleText,omitempty"`
+	}
+	resp := extractResponse{OK: ok, Title: qa.Title, Labels: nonNil(qa.Labels)}
+	if ok && (qa.Schedule.DueDate != "" || qa.Schedule.Recurrence != nil) {
+		resp.DueDate = qa.Schedule.DueDate
+		resp.Recurrence = qa.Schedule.Recurrence
+		resp.ScheduleText = schedule.FormatSchedule(qa.Schedule.DueDate, qa.Schedule.Recurrence, now)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

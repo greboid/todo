@@ -180,8 +180,8 @@
     await store.remove(todo.id);
   }
 
-  async function addChild(title) {
-    await store.create({ title, parentId: todo.id });
+  async function addChild(payload) {
+    await store.create({ ...payload, parentId: todo.id });
   }
 
   function openLabelPicker() {
