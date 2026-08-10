@@ -1,6 +1,7 @@
 <script>
   import { store } from './store.svelte.js';
   import { focus } from './actions.js';
+  import Icon from './Icon.svelte';
 
   let adding = $state(false);
   let newName = $state('');
@@ -108,7 +109,7 @@
     </form>
   {:else}
     <button type="button" class="tab add" onclick={startAdd} aria-label="Add board" title="Add board">
-      ＋
+      <Icon name="plus" size={16} />
     </button>
   {/if}
 
@@ -121,7 +122,7 @@
         aria-label="Board options"
         title="Board options"
       >
-        ⋯
+        <Icon name="ellipsis" size={16} />
       </button>
       {#if menuOpenFor === store.activeBoardId}
         <div class="menu" role="menu">
