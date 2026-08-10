@@ -36,7 +36,8 @@ function createStore() {
   let labels = $state([]);
   let boards = $state([]);
   // Active board is the one currently shown. Persisted across reloads; falls
-  // back to the first board if the stored id no longer exists.
+  // back to the first board if the stored id no longer exists. May also be set
+  // from the URL (?board=<id>) which takes precedence over the stored value.
   let activeBoardId = $state(Number(storage.get('todo:activeBoard')) || null);
 
   // Single-edit enforcement: only one todo may be edited at a time.
@@ -48,14 +49,58 @@ function createStore() {
   // The list filter is evaluated entirely server-side (GET /api/todos?filter=).
   // Syntax: label:<name>, date:<preset|YYYY-MM-DD|range>, has:<complete|label|
   // recur|date>, and bare search text. Prepend ! to label/date/has for negation.
-  // Defaults to "!has:complete" (hide completed). Persisted. An invalid token
-  // makes the API return 400, surfaced here as filterError.
+  // Defaults to "!has:complete" (hide completed). Persisted. May also be set
+  // from the URL (?filter=<text>) which takes precedence over the stored value.
+  // An invalid token makes the API return 400, surfaced here as filterError.
   let filterText = $state(storage.get('todo:filter') || '!has:complete');
   let filterError = $state('');
   let filterTimer = null;
 
   function persistFilter() {
     storage.set('todo:filter', filterText);
+  }
+
+  // --- URL sync ---
+  // board and filter are mirrored into the query string so views are
+  // shareable/bookmarkable. replaceState avoids polluting browser history.
+  function readURLParams() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const board = params.get('board');
+      const filter = params.get('filter');
+      if (board != null && board !== '') {
+        const parsed = Number(board);
+        if (Number.isFinite(parsed) && parsed > 0) activeBoardId = parsed;
+      }
+      if (filter != null) filterText = filter;
+    } catch {
+      /* window/location unavailable — ignore */
+    }
+  }
+
+  function syncURL() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      let changed = false;
+      const boardVal = activeBoardId != null ? String(activeBoardId) : '';
+      if (params.get('board') !== boardVal) {
+        if (boardVal) params.set('board', boardVal);
+        else params.delete('board');
+        changed = true;
+      }
+      if (params.get('filter') !== filterText) {
+        if (filterText) params.set('filter', filterText);
+        else params.delete('filter');
+        changed = true;
+      }
+      if (changed) {
+        const qs = params.toString();
+        const url = qs ? `?${qs}` : window.location.pathname;
+        window.history.replaceState(null, '', url);
+      }
+    } catch {
+      /* window/history unavailable — ignore */
+    }
   }
 
   // ISO date (YYYY-MM-DD) in the user's local timezone. Sent to the API so date
@@ -137,6 +182,7 @@ function createStore() {
   // A 400 means the filter is invalid: surface it as filterError and keep the
   // last good list rather than clearing it.
   async function load() {
+    readURLParams();
     loading = true;
     error = null;
     try {
@@ -153,6 +199,7 @@ function createStore() {
       todos = todoList ?? [];
       labels = labelList ?? [];
       filterError = '';
+      syncURL();
     } catch (e) {
       if (e.status === 400) {
         filterError = e.message;
@@ -168,6 +215,7 @@ function createStore() {
     if (id === activeBoardId) return;
     activeBoardId = id;
     storage.set('todo:activeBoard', String(id));
+    syncURL();
     await load();
   }
 
@@ -196,6 +244,7 @@ function createStore() {
     if (activeBoardId === id) {
       activeBoardId = boards[0]?.id ?? null;
       if (activeBoardId) storage.set('todo:activeBoard', String(activeBoardId));
+      syncURL();
       await load();
     }
   }
@@ -332,6 +381,7 @@ function createStore() {
     setFilterText(text) {
       filterText = text;
       persistFilter();
+      syncURL();
       // Debounce: typing fires one re-fetch after the user pauses.
       clearTimeout(filterTimer);
       filterTimer = setTimeout(() => {
@@ -341,6 +391,7 @@ function createStore() {
     clearFilter() {
       filterText = '';
       persistFilter();
+      syncURL();
       clearTimeout(filterTimer);
       load();
     },
