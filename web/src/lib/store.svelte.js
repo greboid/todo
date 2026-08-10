@@ -36,6 +36,10 @@ function createStore() {
   // back to the first board if the stored id no longer exists.
   let activeBoardId = $state(Number(storage.get('todo:activeBoard')) || null);
 
+  // Whether completed todos are shown. Persisted across reloads; defaults to
+  // hidden so the list stays focused on outstanding work.
+  let showCompleted = $state(storage.get('todo:showCompleted') === '1');
+
   // Single-edit enforcement: only one todo may be edited at a time.
   // editingId holds the id of the todo currently in edit mode (or null).
   // editingDirty becomes true once the user has modified any field; while a
@@ -76,6 +80,19 @@ function createStore() {
     return todos
       .filter((t) => (parentId === null ? t.parentId == null : t.parentId === parentId))
       .sort(byPositionThenId);
+  }
+
+  // Display view of children: completed todos are filtered out unless the
+  // user has opted to show them. Position math (move/drop) keeps using the
+  // unfiltered childrenOf so indices stay aligned with the server.
+  function visibleChildrenOf(parentId) {
+    const all = childrenOf(parentId);
+    return showCompleted ? all : all.filter((t) => !t.completed);
+  }
+
+  function setShowCompleted(value) {
+    showCompleted = value;
+    storage.set('todo:showCompleted', value ? '1' : '0');
   }
 
   // Boards are returned by the API in position order; the switcher relies on it.
@@ -331,6 +348,12 @@ function createStore() {
     get rejectionTick() {
       return rejectionTick;
     },
+    get showCompleted() {
+      return showCompleted;
+    },
+    get completedCount() {
+      return todos.filter((t) => t.completed).length;
+    },
     isEditing(id) {
       return editingId === id;
     },
@@ -341,6 +364,8 @@ function createStore() {
     endEdit,
     markEditDirty,
     childrenOf,
+    visibleChildrenOf,
+    setShowCompleted,
     byId,
     boardById,
     load,

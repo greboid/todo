@@ -5,7 +5,7 @@
   import NewTodo from './lib/NewTodo.svelte';
   import BoardSwitcher from './lib/BoardSwitcher.svelte';
 
-  const roots = $derived(store.childrenOf(null));
+  const roots = $derived(store.visibleChildrenOf(null));
 
   onMount(() => {
     store.load();
@@ -28,14 +28,24 @@
 {#if store.activeBoard}
   <NewTodo placeholder="Add a top-level todo…" onAdd={onAddRoot} />
 
+  <div class="list-toolbar">
+    <label class="toggle">
+      <input
+        type="checkbox"
+        checked={store.showCompleted}
+        onchange={(e) => store.setShowCompleted(e.target.checked)}
+      />
+      Show completed
+      {#if store.completedCount}<span class="count">({store.completedCount})</span>{/if}
+    </label>
+  </div>
+
   <ul
     class="roots"
     role="list"
     ondrop={(e) => {
       e.preventDefault();
-      const id = Number(e.dataTransfer.getData('text/x-todo-id'));
-      if (!id) return;
-      store.move(id, { parentId: null, position: roots.length });
+      store.move(id, { parentId: null, position: store.childrenOf(null).length });
     }}
     ondragover={(e) => {
       // Allow drops; if the pointer is over a child TodoItem it will stop
@@ -74,6 +84,25 @@
   }
   .error {
     color: var(--danger);
+  }
+  .list-toolbar {
+    padding: 0 20px;
+  }
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle input {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .count {
+    color: var(--muted);
   }
   .roots {
     padding: 12px 20px;
