@@ -310,6 +310,7 @@ func toFilterItem(t models.Todo) filter.Item {
 	return filter.Item{
 		ID:            t.ID,
 		ParentID:      t.ParentID,
+		Position:      t.Position,
 		Title:         t.Title,
 		Description:   t.Description,
 		Completed:     t.Completed,
@@ -323,7 +324,9 @@ func toFilterItem(t models.Todo) filter.Item {
 // ListFiltered returns the todos on a board that satisfy q, plus the ancestors
 // that keep the tree connected. It reuses [DB.ListAll] for the full board
 // (labels attached) and applies the filter in Go. today is the reference ISO
-// date (YYYY-MM-DD) used by the date presets.
+// date (YYYY-MM-DD) used by the date presets. When q carries sort criteria,
+// the visible items are reordered within each sibling group (positions
+// reassigned) so the rendered tree reflects the requested order.
 func (d *DB) ListFiltered(ctx context.Context, boardID int64, q filter.Query, today string) ([]models.Todo, error) {
 	all, err := d.ListAll(ctx, boardID)
 	if err != nil {
@@ -336,9 +339,12 @@ func (d *DB) ListFiltered(ctx context.Context, boardID int64, q filter.Query, to
 		byID[t.ID] = t
 	}
 	visible := filter.Apply(items, q, today)
+	visible = filter.Sort(visible, q)
 	out := make([]models.Todo, 0, len(visible))
 	for _, it := range visible {
-		out = append(out, byID[it.ID])
+		t := byID[it.ID]
+		t.Position = it.Position
+		out = append(out, t)
 	}
 	return out, nil
 }
