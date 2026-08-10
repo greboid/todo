@@ -49,7 +49,7 @@
     }
   });
 
-  const children = $derived(store.childrenOf(todo.id));
+  const children = $derived(store.visibleChildrenOf(todo.id));
 
   // Existing labels that match the current typeahead query and aren't applied.
   const labelSuggestions = $derived(
@@ -246,7 +246,7 @@
     if (!id || id === todo.id) return;
     const zone = zoneFromEvent(e);
     if (zone === 'into') {
-      store.move(id, { parentId: todo.id, position: children.length });
+      store.move(id, { parentId: todo.id, position: store.childrenOf(todo.id).length });
     } else {
       const siblings = store.childrenOf(todo.parentId ?? null);
       const myIndex = siblings.findIndex((t) => t.id === todo.id);
@@ -281,7 +281,7 @@
     e.stopPropagation();
     const id = Number(e.dataTransfer.getData('text/x-todo-id'));
     if (!id || id === todo.id) return;
-    store.move(id, { parentId: todo.id, position: children.length });
+    store.move(id, { parentId: todo.id, position: store.childrenOf(todo.id).length });
   }
 
   let classes = $derived(
