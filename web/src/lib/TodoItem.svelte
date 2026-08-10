@@ -342,14 +342,15 @@
   {#if editing}
     <form class="edit" onsubmit={(e) => { e.preventDefault(); saveEdit(); }}>
       <input type="text" bind:value={draftTitle} oninput={store.markEditDirty} onkeydown={onEditKeydown} use:focus />
-      <textarea bind:value={draftDesc} rows="2" placeholder="Description" oninput={store.markEditDirty}></textarea>
-      <input type="text" bind:value={draftLabels} placeholder="Labels (comma separated)" oninput={store.markEditDirty} />
+      <textarea bind:value={draftDesc} rows="2" placeholder="Description" oninput={store.markEditDirty} onkeydown={onEditKeydown}></textarea>
+      <input type="text" bind:value={draftLabels} placeholder="Labels (comma separated)" oninput={store.markEditDirty} onkeydown={onEditKeydown} />
       <input
         type="text"
         class="schedule"
         bind:value={draftSchedule}
         placeholder="Due date or repeat, e.g. aug 15, every 2 weeks on mon, wed, every month on the 15th starting sep 1"
         oninput={store.markEditDirty}
+        onkeydown={onEditKeydown}
       />
       {#if scheduleFeedback}
         <span class="rc-feedback {scheduleFeedback.ok ? 'ok' : 'err'}">
