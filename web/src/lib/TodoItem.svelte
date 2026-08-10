@@ -14,6 +14,11 @@
   let draftLabels = $state('');
   let draftSchedule = $state(''); // combined free-text due+recurrence field
   let addingChild = $state(false);
+  // Single-click on the row toggles a detail view (the description). A short
+  // debounce lets a following double-click (which edits) cancel the toggle,
+  // so single-click expand and double-click edit coexist without flicker.
+  let expanded = $state(false);
+  let clickTimer = null;
 
   // Inline label picker state.
   let labelPickerOpen = $state(false);
@@ -58,6 +63,34 @@
       .filter((l) => !activeLabels.includes(l) && l.toLowerCase().includes(labelQuery.toLowerCase()))
       .slice(0, 8),
   );
+
+  function onHeadClick(e) {
+    // Nothing to reveal when there's no description; double-click still edits.
+    if (!todo.description) return;
+    // Ignore clicks on the checkbox, buttons, or the action cluster.
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || e.target.closest('.actions')) return;
+    // A rapid second click is the start of a double-click — cancel the toggle.
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      return;
+    }
+    clickTimer = setTimeout(() => {
+      clickTimer = null;
+      expanded = !expanded;
+    }, 220);
+  }
+
+  function onHeadDblClick(e) {
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'BUTTON' || e.target.closest('.actions')) return;
+    startEdit();
+  }
 
   function startEdit() {
     if (editing) return;
@@ -286,7 +319,7 @@
   }
 
   let classes = $derived(
-    `item ${todo.completed ? 'done' : ''} ${dropZone ? `drop drop-${dropZone}` : ''}`,
+    `item ${todo.completed ? 'done' : ''} ${dropZone ? `drop drop-${dropZone}` : ''} ${expanded ? 'expanded' : ''}`,
   );
 </script>
 
@@ -329,15 +362,14 @@
   {:else}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       class="head"
       role="group"
-      ondblclick={(e) => {
-        const tag = e.target.tagName;
-        if (tag === 'INPUT' || tag === 'BUTTON' || e.target.closest('.actions')) return;
-        startEdit();
-      }}
+      onclick={onHeadClick}
+      ondblclick={onHeadDblClick}
     >
+      <span class="disclosure">{#if todo.description}<Icon name="chevron" size={14} />{/if}</span>
       <input type="checkbox" checked={todo.completed} onchange={toggleCompleted} />
       <span
         class="title"
@@ -345,7 +377,6 @@
         tabindex="0"
         onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); startEdit(); } }}
       >{todo.title}</span>
-      {#if todo.description}<span class="desc">{todo.description}</span>{/if}
       {#if todo.labels?.length}
         <span class="labels">
           {#each todo.labels as label}<span class="label">{label}</span>{/each}
@@ -368,6 +399,9 @@
         <button class="ghost danger" onclick={onDelete} aria-label="Delete"><Icon name="trash" size={16} /></button>
       </span>
     </div>
+    {#if expanded && todo.description}
+      <div class="detail">{todo.description}</div>
+    {/if}
   {/if}
 
   {#if labelPickerOpen}
@@ -504,18 +538,33 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    cursor: pointer;
   }
   .title {
     font-weight: 500;
   }
   .done .title,
-  .done .desc {
+  .done .detail {
     text-decoration: line-through;
     color: var(--muted);
   }
-  .desc {
+  .detail {
     color: var(--muted);
-    flex: 1 1 auto;
+    margin: 6px 0 2px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .disclosure {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 14px;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  .item.expanded > .head > .disclosure {
+    transform: rotate(90deg);
   }
   .labels {
     display: inline-flex;
