@@ -35,8 +35,16 @@ paths:
       description: >
         Returns todos. Without `boardId`, every todo across all boards is
         returned. Provide `boardId` to scope to a single board.
+
+        With `filter`, matching is performed server-side (see the filter grammar
+        in internal/filter): the response contains only matching todos plus the
+        ancestors that keep the tree connected. `today` (YYYY-MM-DD) anchors the
+        date presets (today/tomorrow/week) to the user's local date. A malformed
+        filter returns 400.
       parameters:
         - $ref: "#/components/parameters/BoardIdQuery"
+        - $ref: "#/components/parameters/FilterQuery"
+        - $ref: "#/components/parameters/TodayQuery"
       responses:
         "200":
           description: Todo list.
@@ -45,6 +53,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Todo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [Todos]
       operationId: createTodo
@@ -316,6 +325,22 @@ components:
       required: false
       description: Scope to a single board. Omit to return todos across all boards.
       schema: { type: integer, format: int64 }
+    FilterQuery:
+      name: filter
+      in: query
+      required: false
+      description: >
+        Server-side filter query. Qualifiers: `label:<name>`, `date:<value>`,
+        `has:<complete|label|recur|date>`, and bare search text. Prepend `!` to
+        label/date/has for negation. Date values: week, overdue, none, today,
+        tomorrow, YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD. Invalid values yield 400.
+      schema: { type: string, example: "!has:complete label:work" }
+    TodayQuery:
+      name: today
+      in: query
+      required: false
+      description: Reference date (YYYY-MM-DD) for the date presets. Defaults to the server date.
+      schema: { type: string, format: date, example: "2026-08-10" }
     LabelNamePath:
       name: name
       in: path

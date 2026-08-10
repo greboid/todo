@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/greboid/todo/internal/filter"
 	"github.com/greboid/todo/internal/models"
 	"github.com/greboid/todo/internal/schedule"
 
@@ -209,6 +210,43 @@ func (d *DB) ListAll(ctx context.Context, boardID int64) ([]models.Todo, error) 
 	}
 	if err := d.attachLabels(ctx, out); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// toFilterItem projects a wire todo into the shape the filter package evaluates.
+func toFilterItem(t models.Todo) filter.Item {
+	return filter.Item{
+		ID:            t.ID,
+		ParentID:      t.ParentID,
+		Title:         t.Title,
+		Description:   t.Description,
+		Completed:     t.Completed,
+		Labels:        t.Labels,
+		DueDate:       t.DueDate,
+		HasRecurrence: t.Recurrence != nil,
+	}
+}
+
+// ListFiltered returns the todos on a board that satisfy q, plus the ancestors
+// that keep the tree connected. It reuses [DB.ListAll] for the full board
+// (labels attached) and applies the filter in Go. today is the reference ISO
+// date (YYYY-MM-DD) used by the date presets.
+func (d *DB) ListFiltered(ctx context.Context, boardID int64, q filter.Query, today string) ([]models.Todo, error) {
+	all, err := d.ListAll(ctx, boardID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]filter.Item, len(all))
+	byID := make(map[int64]models.Todo, len(all))
+	for i, t := range all {
+		items[i] = toFilterItem(t)
+		byID[t.ID] = t
+	}
+	visible := filter.Apply(items, q, today)
+	out := make([]models.Todo, 0, len(visible))
+	for _, it := range visible {
+		out = append(out, byID[it.ID])
 	}
 	return out, nil
 }

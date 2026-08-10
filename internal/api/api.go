@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/greboid/todo/internal/db"
+	"github.com/greboid/todo/internal/filter"
 	"github.com/greboid/todo/internal/models"
 	"github.com/greboid/todo/internal/schedule"
 )
@@ -119,7 +120,29 @@ func (h *Handler) listTodos(w http.ResponseWriter, r *http.Request) {
 			boardID = id
 		}
 	}
-	todos, err := h.store.ListAll(r.Context(), boardID)
+	var (
+		todos []models.Todo
+		err   error
+	)
+	// ?filter=<text> moves all filter parsing/matching server-side. The client
+	// sends its local ?today (YYYY-MM-DD) so date presets resolve from the
+	// user's perspective; it defaults to the server's date when absent. A
+	// malformed filter is a 400 so the UI can surface the error rather than
+	// silently dropping the token.
+	if f := r.URL.Query().Get("filter"); f != "" {
+		parsed, perr := filter.Parse(f)
+		if perr != nil {
+			writeErr(w, http.StatusBadRequest, perr)
+			return
+		}
+		today := r.URL.Query().Get("today")
+		if today == "" {
+			today = time.Now().Format("2006-01-02")
+		}
+		todos, err = h.store.ListFiltered(r.Context(), boardID, parsed, today)
+	} else {
+		todos, err = h.store.ListAll(r.Context(), boardID)
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

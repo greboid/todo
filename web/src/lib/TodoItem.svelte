@@ -280,16 +280,18 @@
     if (!id || id === todo.id) return;
     const zone = zoneFromEvent(e);
     if (zone === 'into') {
-      store.move(id, { parentId: todo.id, position: store.childrenOf(todo.id).length });
+      // Nest as a child. No position => the server appends at the end of all
+      // children (hidden ones included), which is visually last.
+      store.move(id, { parentId: todo.id });
     } else {
-      const siblings = store.childrenOf(todo.parentId ?? null);
-      const myIndex = siblings.findIndex((t) => t.id === todo.id);
-      // Moving before/after a sibling uses absolute target index.
-      const targetIndex = zone === 'before' ? myIndex : myIndex + 1;
-      // Root todos serialize with omitempty parentId, so todo.parentId is
-      // undefined at runtime — coerce to null so the store treats this as an
-      // explicit move-to-root rather than "leave parent unchanged".
-      store.move(id, { parentId: todo.parentId ?? null, position: targetIndex });
+      // Drop before/after this todo. Use its stored (absolute) position so the
+      // target stays correct even when the filter hides siblings. Root todos
+      // serialize with omitempty parentId, so coerce undefined -> null for an
+      // explicit move-to-root.
+      store.move(id, {
+        parentId: todo.parentId ?? null,
+        position: store.dropPosition(id, todo, zone),
+      });
     }
     dropZone = null;
   }
@@ -315,7 +317,7 @@
     e.stopPropagation();
     const id = Number(e.dataTransfer.getData('text/x-todo-id'));
     if (!id || id === todo.id) return;
-    store.move(id, { parentId: todo.id, position: store.childrenOf(todo.id).length });
+    store.move(id, { parentId: todo.id });
   }
 
   let classes = $derived(
