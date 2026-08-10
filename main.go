@@ -29,12 +29,13 @@ func main() {
 
 func run() error {
 	addr := envOr("TODO_ADDR", ":8080")
-	dbPath := envOr("TODO_DB", "todo.db")
+	driver := envOr("TODO_DB_DRIVER", "sqlite")
+	dsn := envOr("TODO_DB", "todo.db")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	store, err := db.New(ctx, dbPath)
+	store, err := db.New(ctx, driver, dsn)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -61,7 +62,7 @@ func run() error {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	slog.Info("todo listening", "addr", addr, "db", dbPath)
+	slog.Info("todo listening", "addr", addr, "driver", driver, "db", dsn)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen: %w", err)
 	}

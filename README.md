@@ -1,8 +1,8 @@
 # Todo
 
 A self-hosted, single-binary todo app. A Go HTTP server embeds a Svelte 5 SPA
-and stores everything in a local SQLite database, so the whole thing ships as
-one executable with no external dependencies and no accounts.
+and stores your data in SQLite (default) or Postgres, so the whole thing ships
+as one executable with no external dependencies and no accounts.
 
 ## Features
 
@@ -68,8 +68,29 @@ The app is configured entirely through environment variables:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `TODO_ADDR` | `:8080` | Address the HTTP server listens on |
-| `TODO_DB` | `todo.db` | Path to the SQLite database file |
+| `TODO_DB_DRIVER` | `sqlite` | Database backend: `sqlite` (also `sqlite3` or empty) or `postgres` (also `pg`/`postgresql`) |
+| `TODO_DB` | `todo.db` | For SQLite, the database file path; for Postgres, a libpq-style connection string |
 
-By default the database is created next to the binary in the current working
-directory. Set `TODO_DB` to an absolute path (or run the container with a
-mounted `/data`) to control where it lives.
+### SQLite (default)
+
+No extra configuration is needed — the database is created next to the binary
+in the current working directory. Set `TODO_DB` to an absolute path (or run the
+container with a mounted `/data`) to control where it lives:
+
+```sh
+TODO_DB=/var/lib/todo/todo.db ./todo
+```
+
+### Postgres
+
+Point the app at an existing Postgres instance by setting `TODO_DB_DRIVER` and
+passing a libpq-style connection string in `TODO_DB`:
+
+```sh
+TODO_DB_DRIVER=postgres \
+TODO_DB='postgres://user:pass@host:5432/todo?sslmode=disable' \
+./todo
+```
+
+The app applies its own schema on startup, so just create an empty database
+and grant the connecting role permission to create tables.

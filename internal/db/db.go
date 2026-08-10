@@ -1,4 +1,7 @@
-// Package db provides a sqlite-backed persistence layer for todos.
+// Package db provides the persistence layer for todos, backed by SQLite or
+// Postgres. All data access goes through the bun query builder so the same code
+// runs on either engine; the dialect (placeholder rebinding, identity columns,
+// type mapping) is handled by bun.
 package db
 
 import (
@@ -7,133 +10,181 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/greboid/todo/internal/models"
 
-	// modernc.org/sqlite is a pure-Go (no CGO) sqlite driver registered
-	// under the driver name "sqlite".
-	_ "modernc.org/sqlite"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/uptrace/bun/driver/sqliteshim"
+	"github.com/uptrace/bun/schema"
 )
 
 // DB is the todo persistence layer.
 type DB struct {
-	conn *sql.DB
+	db *bun.DB
 }
 
-// New opens (or creates) the sqlite database at path and applies the schema.
-// busy_timeout makes writes block briefly instead of erroring under concurrency.
-func New(ctx context.Context, path string) (*DB, error) {
-	conn, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite %q: %w", path, err)
+// New opens (or creates) the database for driver and applies the schema. driver
+// selects the backend: "sqlite" (default; also "sqlite3"/"") opens a local
+// SQLite file at dsn with a 5s busy timeout and foreign keys on; "postgres"
+// (also "pg"/"postgresql") opens dsn as a Postgres connection string. SQLite
+// serializes writes so its pool is capped at one connection; Postgres is left
+// at the driver default.
+func New(ctx context.Context, driver, dsn string) (*DB, error) {
+	var sqldb *sql.DB
+	var dl schema.Dialect
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "", "sqlite", "sqlite3":
+		var err error
+		sqldb, err = sql.Open(sqliteshim.ShimName, dsn+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+		if err != nil {
+			return nil, fmt.Errorf("open sqlite %q: %w", dsn, err)
+		}
+		sqldb.SetMaxOpenConns(1) // sqlite serializes writes; keep it simple and correct
+		dl = sqlitedialect.New()
+	case "postgres", "postgresql", "pg":
+		sqldb = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+		dl = pgdialect.New()
+	default:
+		return nil, fmt.Errorf("unsupported db driver %q (want sqlite or postgres)", driver)
 	}
-	conn.SetMaxOpenConns(1) // sqlite serializes writes; keep it simple and correct
-	if err := conn.PingContext(ctx); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("ping sqlite: %w", err)
+	if err := sqldb.PingContext(ctx); err != nil {
+		_ = sqldb.Close()
+		return nil, fmt.Errorf("ping %s: %w", dl.Name(), err)
 	}
-	d := &DB{conn: conn}
+	d := &DB{db: bun.NewDB(sqldb, dl)}
 	if err := d.migrate(ctx); err != nil {
-		_ = conn.Close()
+		_ = d.db.Close()
 		return nil, err
 	}
 	return d, nil
 }
 
 // Close releases the database handle.
-func (d *DB) Close() error { return d.conn.Close() }
+func (d *DB) Close() error { return d.db.Close() }
 
-const schema = `
-CREATE TABLE IF NOT EXISTS boards (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    name     TEXT    NOT NULL,
-    position INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_boards_position ON boards(position, id);
+// Persistence models. These are db-internal (unexported) and separate from the
+// internal/models wire DTOs so the JSON contract is unchanged. Completed stays
+// an int: scanning an existing SQLite INTEGER (or Postgres integer) column into
+// a bool fails in database/sql, and the mapper converts it for the DTO.
 
-CREATE TABLE IF NOT EXISTS todos (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    board_id    INTEGER NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
-    title       TEXT    NOT NULL,
-    description TEXT    NOT NULL DEFAULT '',
-    completed   INTEGER NOT NULL DEFAULT 0,
-    parent_id   INTEGER NULL REFERENCES todos(id) ON DELETE CASCADE,
-    position    INTEGER NOT NULL DEFAULT 0,
-    due_date    TEXT    NULL,
-    recurrence  TEXT    NULL
-);
-CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(board_id, parent_id, position);
-
-CREATE TABLE IF NOT EXISTS labels (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    name  TEXT NOT NULL UNIQUE
-);
-
-CREATE TABLE IF NOT EXISTS todo_labels (
-    todo_id  INTEGER NOT NULL REFERENCES todos(id)    ON DELETE CASCADE,
-    label_id INTEGER NOT NULL REFERENCES labels(id)   ON DELETE CASCADE,
-    PRIMARY KEY (todo_id, label_id)
-);
-
-CREATE TABLE IF NOT EXISTS predefined_labels (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL UNIQUE,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`
-
-func (d *DB) migrate(ctx context.Context) error {
-	if _, err := d.conn.ExecContext(ctx, schema); err != nil {
-		return err
-	}
-	// schema is CREATE TABLE IF NOT EXISTS, which cannot add columns to an
-	// already-existing table. Upgrade older DBs in place with idempotent
-	// ALTER TABLE statements guarded by PRAGMA table_info.
-	return d.addColumnsIfMissing(ctx, "todos", []columnSpec{
-		{"due_date", "TEXT NULL"},
-		{"recurrence", "TEXT NULL"},
-	})
+type board struct {
+	bun.BaseModel `bun:"table:boards"`
+	ID            int64  `bun:"id,pk,autoincrement"`
+	Name          string `bun:"name,notnull"`
+	Position      int    `bun:"position,notnull"`
 }
 
-// columnSpec names a column and the tail of its ALTER TABLE ADD COLUMN DDL.
-type columnSpec struct{ name, ddl string }
+type todo struct {
+	bun.BaseModel `bun:"table:todos"`
+	ID            int64   `bun:"id,pk,autoincrement"`
+	BoardID       int64   `bun:"board_id,notnull"`
+	Title         string  `bun:"title,notnull"`
+	Description   string  `bun:"description,notnull"`
+	Completed     int     `bun:"completed,notnull"`
+	ParentID      *int64  `bun:"parent_id,nullzero"`
+	Position      int     `bun:"position,notnull"`
+	DueDate       *string `bun:"due_date,nullzero"`
+	Recurrence    *string `bun:"recurrence,nullzero"` // raw JSON text, as today
+}
 
-// addColumnsIfMissing adds each missing column to table via ALTER TABLE.
-// Columns already present (per PRAGMA table_info) are skipped, making it a
-// no-op on fresh and already-migrated databases.
-func (d *DB) addColumnsIfMissing(ctx context.Context, table string, cols []columnSpec) error {
-	rows, err := d.conn.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
-	if err != nil {
-		return fmt.Errorf("table_info %s: %w", table, err)
+type label struct {
+	bun.BaseModel `bun:"table:labels"`
+	ID            int64  `bun:"id,pk,autoincrement"`
+	Name          string `bun:"name,notnull,unique"`
+}
+
+type todoLabel struct {
+	bun.BaseModel `bun:"table:todo_labels"`
+	TodoID        int64 `bun:"todo_id,pk"`
+	LabelID       int64 `bun:"label_id,pk"`
+}
+
+type predefinedLabel struct {
+	bun.BaseModel `bun:"table:predefined_labels"`
+	ID            int64  `bun:"id,pk,autoincrement"`
+	Name          string `bun:"name,notnull,unique"`
+}
+
+func (b board) toModel() models.Board {
+	return models.Board{ID: b.ID, Name: b.Name, Position: b.Position}
+}
+
+func (t todo) toModel(labels []string) models.Todo {
+	m := models.Todo{
+		ID:          t.ID,
+		BoardID:     t.BoardID,
+		Title:       t.Title,
+		Description: t.Description,
+		Completed:   t.Completed != 0,
+		ParentID:    t.ParentID,
+		Position:    t.Position,
+		Labels:      labels,
 	}
-	existing := make(map[string]bool)
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			rows.Close()
+	if t.DueDate != nil {
+		m.DueDate = *t.DueDate
+	}
+	if t.Recurrence != nil && *t.Recurrence != "" {
+		var rc models.Recurrence
+		if err := json.Unmarshal([]byte(*t.Recurrence), &rc); err == nil {
+			m.Recurrence = &rc
+		}
+	}
+	return m
+}
+
+// migrate creates the schema. Each statement is IF NOT EXISTS, so it is a no-op
+// on an already-present table (existing SQLite DBs are left untouched; column
+// names match the old schema so scanning is unaffected). Identity/sequence,
+// composite primary keys, foreign keys, and indexes are all dialect-generated
+// by bun so the same DDL runs on SQLite and Postgres.
+func (d *DB) migrate(ctx context.Context) error {
+	steps := []func(context.Context) error{
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateTable().Model((*board)(nil)).IfNotExists().Exec(ctx)
 			return err
-		}
-		existing[name] = true
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateTable().Model((*todo)(nil)).IfNotExists().
+				ForeignKey(`("board_id") REFERENCES boards(id) ON DELETE CASCADE`).
+				ForeignKey(`("parent_id") REFERENCES todos(id) ON DELETE CASCADE`).
+				Exec(ctx)
+			return err
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateTable().Model((*label)(nil)).IfNotExists().Exec(ctx)
+			return err
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateTable().Model((*todoLabel)(nil)).IfNotExists().
+				ForeignKey(`("todo_id") REFERENCES todos(id) ON DELETE CASCADE`).
+				ForeignKey(`("label_id") REFERENCES labels(id) ON DELETE CASCADE`).
+				Exec(ctx)
+			return err
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateTable().Model((*predefinedLabel)(nil)).IfNotExists().Exec(ctx)
+			return err
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateIndex().IfNotExists().Index("idx_boards_position").
+				Table("boards").Column("position", "id").Exec(ctx)
+			return err
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateIndex().IfNotExists().Index("idx_todos_parent").
+				Table("todos").Column("board_id", "parent_id", "position").Exec(ctx)
+			return err
+		},
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	rows.Close()
-	for _, c := range cols {
-		if existing[c.name] {
-			continue
-		}
-		if _, err := d.conn.ExecContext(ctx,
-			`ALTER TABLE `+table+` ADD COLUMN `+c.name+` `+c.ddl); err != nil {
-			return fmt.Errorf("add column %s.%s: %w", table, c.name, err)
+	for _, step := range steps {
+		if err := step(ctx); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -143,44 +194,17 @@ func (d *DB) addColumnsIfMissing(ctx context.Context, table string, cols []colum
 // boardID <= 0 returns todos across all boards (used by the legacy complete-cascade
 // sync path which already re-scopes on the client).
 func (d *DB) ListAll(ctx context.Context, boardID int64) ([]models.Todo, error) {
-	const query = `SELECT id, board_id, title, description, completed, parent_id, position, due_date, recurrence
-        FROM todos
-        WHERE (? = 0 OR board_id = ?)
-        ORDER BY COALESCE(parent_id, 0), position, id`
-	rows, err := d.conn.QueryContext(ctx, query, boardID, boardID)
-	if err != nil {
+	var ts []todo
+	q := d.db.NewSelect().Model(&ts)
+	if boardID > 0 {
+		q = q.Where("board_id = ?", boardID)
+	}
+	if err := q.OrderExpr("COALESCE(parent_id, 0), position, id").Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []models.Todo
-	for rows.Next() {
-		var t models.Todo
-		var parentID sql.NullInt64
-		var completed int
-		var dueNS, recurNS sql.NullString
-		if err := rows.Scan(&t.ID, &t.BoardID, &t.Title, &t.Description, &completed, &parentID, &t.Position, &dueNS, &recurNS); err != nil {
-			return nil, err
-		}
-		t.Completed = completed != 0
-		if parentID.Valid {
-			pid := parentID.Int64
-			t.ParentID = &pid
-		}
-		if dueNS.Valid {
-			t.DueDate = dueNS.String
-		}
-		if recurNS.Valid && recurNS.String != "" {
-			var rc models.Recurrence
-			if err := json.Unmarshal([]byte(recurNS.String), &rc); err != nil {
-				return nil, err
-			}
-			t.Recurrence = &rc
-		}
-		out = append(out, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	out := make([]models.Todo, len(ts))
+	for i, t := range ts {
+		out[i] = t.toModel(nil)
 	}
 	if err := d.attachLabels(ctx, out); err != nil {
 		return nil, err
@@ -188,34 +212,32 @@ func (d *DB) ListAll(ctx context.Context, boardID int64) ([]models.Todo, error) 
 	return out, nil
 }
 
+// attachLabels fetches the labels for each todo and stamps them in place.
 func (d *DB) attachLabels(ctx context.Context, ts []models.Todo) error {
 	if len(ts) == 0 {
 		return nil
 	}
-	ids := make([]any, len(ts))
+	ids := make([]int64, len(ts))
 	for i, t := range ts {
 		ids[i] = t.ID
 	}
-	q := `SELECT tl.todo_id, l.name FROM todo_labels tl
-          JOIN labels l ON l.id = tl.label_id
-          WHERE tl.todo_id IN (` + placeholders(len(ids)) + `)
-          ORDER BY l.name`
-	rows, err := d.conn.QueryContext(ctx, q, ids...)
+	var rows []struct {
+		TodoID int64  `bun:"todo_id"`
+		Name   string `bun:"name"`
+	}
+	err := d.db.NewSelect().
+		ColumnExpr("tl.todo_id, l.name").
+		TableExpr("todo_labels AS tl").
+		Join("JOIN labels AS l ON l.id = tl.label_id").
+		Where("tl.todo_id IN (?)", bun.In(ids)).
+		OrderExpr("l.name").
+		Scan(ctx, &rows)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	byID := make(map[int64][]string, len(ts))
-	for rows.Next() {
-		var todoID int64
-		var name string
-		if err := rows.Scan(&todoID, &name); err != nil {
-			return err
-		}
-		byID[todoID] = append(byID[todoID], name)
-	}
-	if err := rows.Err(); err != nil {
-		return err
+	for _, r := range rows {
+		byID[r.TodoID] = append(byID[r.TodoID], r.Name)
 	}
 	for i := range ts {
 		ts[i].Labels = byID[ts[i].ID]
@@ -223,9 +245,18 @@ func (d *DB) attachLabels(ctx context.Context, ts []models.Todo) error {
 	return nil
 }
 
-// placeholders returns a comma-separated list of n SQL parameter markers.
-func placeholders(n int) string {
-	return strings.Join(slices.Repeat([]string{"?"}, n), ",")
+// labelNamesForTodo returns the sorted label names attached to a single todo.
+// Usable inside a transaction (run is a bun.IDB) for the clone-next path.
+func labelNamesForTodo(ctx context.Context, run bun.IDB, todoID int64) ([]string, error) {
+	var names []string
+	err := run.NewSelect().
+		ColumnExpr("l.name").
+		TableExpr("todo_labels AS tl").
+		Join("JOIN labels AS l ON l.id = tl.label_id").
+		Where("tl.todo_id = ?", todoID).
+		OrderExpr("l.name").
+		Scan(ctx, &names)
+	return names, err
 }
 
 // Create inserts a todo. If Position is nil the item is appended after the
@@ -236,7 +267,7 @@ func placeholders(n int) string {
 // board (subtasks always live on their parent's board). Otherwise BoardID must
 // be supplied; if neither is present the request is rejected.
 func (d *DB) Create(ctx context.Context, in models.CreateTodo) (models.Todo, error) {
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.Todo{}, err
 	}
@@ -251,36 +282,37 @@ func (d *DB) Create(ctx context.Context, in models.CreateTodo) (models.Todo, err
 	if err != nil {
 		return models.Todo{}, err
 	}
-	parent := toNullInt64(in.ParentID)
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO todos (board_id, title, description, completed, parent_id, position, due_date, recurrence)
-         VALUES (?, ?, ?, 0, ?, ?, ?, ?)`,
-		boardID, in.Title, in.Description, parent, pos, toNullString(in.DueDate), recurrenceJSON(in.Recurrence))
-	if err != nil {
+	t := todo{
+		BoardID:     boardID,
+		Title:       in.Title,
+		Description: in.Description,
+		ParentID:    in.ParentID,
+		Position:    pos,
+		DueDate:     in.DueDate,
+		Recurrence:  recurrenceString(in.Recurrence),
+	}
+	if err := tx.NewInsert().Model(&t).Returning("id").Scan(ctx, &t.ID); err != nil {
 		return models.Todo{}, fmt.Errorf("insert todo: %w", err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
+	if err := shiftSiblingsAfter(ctx, tx, boardID, in.ParentID, pos, 1, t.ID); err != nil {
 		return models.Todo{}, err
 	}
-	if err := shiftSiblingsAfter(ctx, tx, boardID, in.ParentID, pos, 1, id); err != nil {
-		return models.Todo{}, err
-	}
-	if err := setLabelsTx(ctx, tx, id, in.Labels); err != nil {
+	if err := setLabelsTx(ctx, tx, t.ID, in.Labels); err != nil {
 		return models.Todo{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return models.Todo{}, err
 	}
-	return d.Get(ctx, id)
+	return d.Get(ctx, t.ID)
 }
 
 // resolveBoardID picks the board a new todo belongs to. Subtasks inherit the
 // parent's board; top-level todos must name a board explicitly.
-func resolveBoardID(ctx context.Context, tx *sql.Tx, parentID *int64, supplied *int64) (int64, error) {
+func resolveBoardID(ctx context.Context, run bun.IDB, parentID, supplied *int64) (int64, error) {
 	if parentID != nil {
 		var bid int64
-		err := tx.QueryRowContext(ctx, `SELECT board_id FROM todos WHERE id = ?`, *parentID).Scan(&bid)
+		err := run.NewSelect().ColumnExpr("board_id").TableExpr("todos").
+			Where("id = ?", *parentID).Scan(ctx, &bid)
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, ErrNotFound
 		}
@@ -292,11 +324,12 @@ func resolveBoardID(ctx context.Context, tx *sql.Tx, parentID *int64, supplied *
 	if supplied == nil || *supplied <= 0 {
 		return 0, ErrNoBoard
 	}
-	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM boards WHERE id = ?`, *supplied).Scan(&exists); err != nil {
+	var count int
+	if err := run.NewSelect().ColumnExpr("COUNT(*)").TableExpr("boards").
+		Where("id = ?", *supplied).Scan(ctx, &count); err != nil {
 		return 0, err
 	}
-	if exists == 0 {
+	if count == 0 {
 		return 0, ErrBoardNotFound
 	}
 	return *supplied, nil
@@ -304,36 +337,15 @@ func resolveBoardID(ctx context.Context, tx *sql.Tx, parentID *int64, supplied *
 
 // Get returns a single todo with labels.
 func (d *DB) Get(ctx context.Context, id int64) (models.Todo, error) {
-	var t models.Todo
-	var parentID sql.NullInt64
-	var completed int
-	var dueNS, recurNS sql.NullString
-	err := d.conn.QueryRowContext(ctx, `
-        SELECT id, board_id, title, description, completed, parent_id, position, due_date, recurrence
-        FROM todos WHERE id = ?`, id).Scan(
-		&t.ID, &t.BoardID, &t.Title, &t.Description, &completed, &parentID, &t.Position, &dueNS, &recurNS)
+	var t todo
+	err := d.db.NewSelect().Model(&t).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Todo{}, ErrNotFound
 	}
 	if err != nil {
 		return models.Todo{}, err
 	}
-	t.Completed = completed != 0
-	if parentID.Valid {
-		pid := parentID.Int64
-		t.ParentID = &pid
-	}
-	if dueNS.Valid {
-		t.DueDate = dueNS.String
-	}
-	if recurNS.Valid && recurNS.String != "" {
-		var rc models.Recurrence
-		if err := json.Unmarshal([]byte(recurNS.String), &rc); err != nil {
-			return models.Todo{}, err
-		}
-		t.Recurrence = &rc
-	}
-	wrapped := []models.Todo{t}
+	wrapped := []models.Todo{t.toModel(nil)}
 	if err := d.attachLabels(ctx, wrapped); err != nil {
 		return models.Todo{}, err
 	}
@@ -341,8 +353,9 @@ func (d *DB) Get(ctx context.Context, id int64) (models.Todo, error) {
 }
 
 // SetCompleted sets the completed flag on a todo and, recursively, all of its
-// descendants. A single recursive CTE walks the subtree so the cascade is
-// atomic. Returns the updated root todo.
+// descendants. Descendants are walked in Go (parent_id by parent_id) and the
+// whole subtree is updated in one statement, so the cascade is as atomic as a
+// single UPDATE. Returns the updated root todo.
 func (d *DB) SetCompleted(ctx context.Context, id int64, completed bool) (models.Todo, error) {
 	// Completing a recurring todo spawns a fresh incomplete instance (clone-next)
 	// before the completion cascade runs. Un-completing does not spawn.
@@ -351,15 +364,13 @@ func (d *DB) SetCompleted(ctx context.Context, id int64, completed bool) (models
 			return models.Todo{}, err
 		}
 	}
-	value := boolToInt(completed)
-	res, err := d.conn.ExecContext(ctx, `
-        WITH descendants(id) AS (
-            SELECT id FROM todos WHERE id = ?
-            UNION ALL
-            SELECT t.id FROM todos t JOIN descendants d ON t.parent_id = d.id
-        )
-        UPDATE todos SET completed = ?
-        WHERE id IN (SELECT id FROM descendants)`, id, value)
+	ids, err := descendantIDs(ctx, d.db, id)
+	if err != nil {
+		return models.Todo{}, err
+	}
+	res, err := d.db.NewUpdate().Model((*todo)(nil)).
+		Set("completed = ?", boolToInt(completed)).
+		Where("id IN (?)", bun.In(ids)).Exec(ctx)
 	if err != nil {
 		return models.Todo{}, err
 	}
@@ -369,25 +380,45 @@ func (d *DB) SetCompleted(ctx context.Context, id int64, completed bool) (models
 	return d.Get(ctx, id)
 }
 
+// descendantIDs returns id and all of its transitive descendants (children,
+// grandchildren, ...), walking parent_id in Go. Order does not matter: the
+// caller updates the whole set at once. A seen set guards against any cycle.
+func descendantIDs(ctx context.Context, run bun.IDB, id int64) ([]int64, error) {
+	var ids []int64
+	seen := make(map[int64]struct{})
+	queue := []int64{id}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if _, ok := seen[cur]; ok {
+			continue
+		}
+		seen[cur] = struct{}{}
+		ids = append(ids, cur)
+		var children []int64
+		if err := run.NewSelect().ColumnExpr("id").TableExpr("todos").
+			Where("parent_id = ?", cur).Scan(ctx, &children); err != nil {
+			return nil, err
+		}
+		queue = append(queue, children...)
+	}
+	return ids, nil
+}
+
 // spawnNextIfRecurring clones a recurring todo's next occurrence. If the todo
 // has no recurrence rule it is a no-op. Otherwise it inserts a new incomplete
 // todo (same board, parent, title, description, recurrence rule; due date
 // advanced) at the end of the sibling group and copies the original's labels,
 // leaving the soon-to-be-completed original in place. Runs in its own tx.
 func (d *DB) spawnNextIfRecurring(ctx context.Context, id int64) error {
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var title, description string
-	var boardID int64
-	var parentID sql.NullInt64
-	var dueNS, recurNS sql.NullString
-	err = tx.QueryRowContext(ctx,
-		`SELECT title, description, board_id, parent_id, due_date, recurrence FROM todos WHERE id = ?`, id).
-		Scan(&title, &description, &boardID, &parentID, &dueNS, &recurNS)
+	var src todo
+	err = tx.NewSelect().Model(&src).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -395,16 +426,16 @@ func (d *DB) spawnNextIfRecurring(ctx context.Context, id int64) error {
 		return err
 	}
 	// Not recurring: nothing to do.
-	if !recurNS.Valid || recurNS.String == "" {
+	if src.Recurrence == nil || *src.Recurrence == "" {
 		return nil
 	}
 	var rc models.Recurrence
-	if err := json.Unmarshal([]byte(recurNS.String), &rc); err != nil {
+	if err := json.Unmarshal([]byte(*src.Recurrence), &rc); err != nil {
 		return fmt.Errorf("unmarshal recurrence: %w", err)
 	}
 	var due string
-	if dueNS.Valid {
-		due = dueNS.String
+	if src.DueDate != nil {
+		due = *src.DueDate
 	}
 	next, recurring, err := nextDueDate(due, rc)
 	if err != nil {
@@ -417,31 +448,30 @@ func (d *DB) spawnNextIfRecurring(ctx context.Context, id int64) error {
 	}
 
 	// Append the clone to the end of its sibling group (no shift needed).
-	var parent *int64
-	if parentID.Valid {
-		pid := parentID.Int64
-		parent = &pid
-	}
-	count, err := countSiblings(ctx, tx, boardID, parent)
+	count, err := countSiblings(ctx, tx, src.BoardID, src.ParentID)
 	if err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO todos (board_id, title, description, completed, parent_id, position, due_date, recurrence)
-         VALUES (?, ?, ?, 0, ?, ?, ?, ?)`,
-		boardID, title, description, toNullInt64(parent), count, next, recurNS.String)
-	if err != nil {
+	nextDate := next
+	clone := todo{
+		BoardID:     src.BoardID,
+		Title:       src.Title,
+		Description: src.Description,
+		ParentID:    src.ParentID,
+		Position:    count,
+		DueDate:     &nextDate,
+		Recurrence:  src.Recurrence,
+	}
+	if err := tx.NewInsert().Model(&clone).Returning("id").Scan(ctx, &clone.ID); err != nil {
 		return fmt.Errorf("insert recurring clone: %w", err)
 	}
-	cloneID, err := res.LastInsertId()
+	// Copy the original's labels onto the clone (re-linked by name).
+	sourceLabels, err := labelNamesForTodo(ctx, tx, id)
 	if err != nil {
-		return err
-	}
-	// Copy the original's labels onto the clone in one statement.
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO todo_labels (todo_id, label_id) SELECT ?, label_id FROM todo_labels WHERE todo_id = ?`,
-		cloneID, id); err != nil {
 		return fmt.Errorf("copy recurring clone labels: %w", err)
+	}
+	if err := setLabelsTx(ctx, tx, clone.ID, sourceLabels); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -627,10 +657,25 @@ func recurrenceJSON(rc *models.Recurrence) any {
 	return string(b)
 }
 
+// recurrenceString is the *string form of recurrenceJSON, used to populate a
+// model field for insert (the JSON is stored verbatim so a recurrence chain
+// continues unchanged).
+func recurrenceString(rc *models.Recurrence) *string {
+	if rc == nil {
+		return nil
+	}
+	b, err := json.Marshal(rc)
+	if err != nil {
+		return nil
+	}
+	s := string(b)
+	return &s
+}
+
 // Update applies a partial update to a todo. Position/ParentID changes route
 // through Move for correct sibling reordering.
 func (d *DB) Update(ctx context.Context, id int64, in models.UpdateTodo) (models.Todo, error) {
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.Todo{}, err
 	}
@@ -638,44 +683,38 @@ func (d *DB) Update(ctx context.Context, id int64, in models.UpdateTodo) (models
 
 	// Confirm the todo exists; scalar fields don't depend on current values.
 	var exists int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM todos WHERE id = ?`, id).Scan(&exists); err != nil {
+	if err := tx.NewSelect().ColumnExpr("id").TableExpr("todos").
+		Where("id = ?", id).Scan(ctx, &exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return models.Todo{}, ErrNotFound
 		}
 		return models.Todo{}, err
 	}
 
-	var sets []string
-	var args []any
+	q := tx.NewUpdate().Model((*todo)(nil)).Where("id = ?", id)
 	if in.Title != nil {
-		sets = append(sets, "title = ?")
-		args = append(args, *in.Title)
+		q = q.Set("title = ?", *in.Title)
 	}
 	if in.Description != nil {
-		sets = append(sets, "description = ?")
-		args = append(args, *in.Description)
+		q = q.Set("description = ?", *in.Description)
 	}
 	if in.Completed != nil {
-		sets = append(sets, "completed = ?")
-		args = append(args, boolToInt(*in.Completed))
+		q = q.Set("completed = ?", boolToInt(*in.Completed))
 	}
 	if in.DueDateSet {
-		sets = append(sets, "due_date = ?")
-		args = append(args, toNullString(in.DueDate)) // nil clears the column
+		q = q.Set("due_date = ?", toNullString(in.DueDate)) // nil clears the column
 	}
 	if in.RecurrenceSet {
-		sets = append(sets, "recurrence = ?")
-		args = append(args, recurrenceJSON(in.Recurrence)) // nil clears
-	}
-	if len(sets) > 0 {
-		args = append(args, id)
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE todos SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
-			return models.Todo{}, err
-		}
+		q = q.Set("recurrence = ?", recurrenceJSON(in.Recurrence)) // nil clears
 	}
 	if in.Labels != nil {
 		if err := setLabelsTx(ctx, tx, id, *in.Labels); err != nil {
+			return models.Todo{}, err
+		}
+	}
+	// An UPDATE with no SET is invalid SQL; only run when a field changed.
+	if in.Title != nil || in.Description != nil || in.Completed != nil || in.DueDateSet || in.RecurrenceSet {
+		if _, err := q.Exec(ctx); err != nil {
 			return models.Todo{}, err
 		}
 	}
@@ -699,17 +738,14 @@ func (d *DB) Update(ctx context.Context, id int64, in models.UpdateTodo) (models
 // position among its siblings, or both. Other siblings are shifted to keep
 // positions gapless within both the old and new sibling groups.
 func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Todo, error) {
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.Todo{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var curParent sql.NullInt64
-	var curPos int
-	var curBoard int64
-	err = tx.QueryRowContext(ctx, `SELECT board_id, parent_id, position FROM todos WHERE id = ?`, id).
-		Scan(&curBoard, &curParent, &curPos)
+	var cur todo
+	err = tx.NewSelect().Model(&cur).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Todo{}, ErrNotFound
 	}
@@ -721,7 +757,7 @@ func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Tod
 	// Target board defaults to the todo's current board. If the todo is being
 	// nested under a parent in another board, the parent's board wins (subtasks
 	// always live on their parent's board).
-	targetBoard := curBoard
+	targetBoard := cur.BoardID
 	if in.Set {
 		// Client explicitly set parentId (either a value or null).
 		newParent = in.ID
@@ -733,29 +769,31 @@ func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Tod
 				return models.Todo{}, err
 			}
 			// Inherit the parent's board so a subtask always shares its board.
-			if err := tx.QueryRowContext(ctx,
-				`SELECT board_id FROM todos WHERE id = ?`, *newParent).Scan(&targetBoard); err != nil {
+			if err := tx.NewSelect().ColumnExpr("board_id").TableExpr("todos").
+				Where("id = ?", *newParent).Scan(ctx, &targetBoard); err != nil {
 				return models.Todo{}, err
 			}
 		}
 		// newParent == nil here means "move to root"; keep current board.
-	} else if curParent.Valid {
-		p := curParent.Int64
-		newParent = &p
+	} else if cur.ParentID != nil {
+		newParent = cur.ParentID
 	}
 
 	// If only position changes and it equals current, nothing to do.
-	targetPos := curPos
+	targetPos := cur.Position
 	if in.Position != nil {
 		targetPos = *in.Position
 	}
-	movingToNewParent := in.Set && !sameParent(newParent, nullableToPtr(curParent))
+	movingToNewParent := in.Set && !sameParent(newParent, cur.ParentID)
 	// Remove from current ordering (gap-closer). Scope by board so reordering
-	// in one board never perturbs positions in another.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE todos SET position = position - 1
-         WHERE board_id = ? AND parent_id IS ? AND position > ? AND id <> ?`,
-		curBoard, curParent, curPos, id); err != nil {
+	// in one board never perturbs positions in another. IS NOT DISTINCT FROM
+	// is null-safe equality (nil binds NULL, matching root todos) on both engines.
+	if _, err := tx.NewUpdate().Model((*todo)(nil)).
+		Set("position = position - 1").
+		Where("board_id = ?", cur.BoardID).
+		Where("parent_id IS NOT DISTINCT FROM ?", toNullInt64(cur.ParentID)).
+		Where("position > ?", cur.Position).
+		Where("id <> ?", id).Exec(ctx); err != nil {
 		return models.Todo{}, err
 	}
 
@@ -779,16 +817,20 @@ func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Tod
 	}
 
 	// Make room at target in the (possibly new) sibling group.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE todos SET position = position + 1
-         WHERE board_id = ? AND parent_id IS ? AND position >= ? AND id <> ?`,
-		targetBoard, toNullInt64(newParent), targetPos, id); err != nil {
+	if _, err := tx.NewUpdate().Model((*todo)(nil)).
+		Set("position = position + 1").
+		Where("board_id = ?", targetBoard).
+		Where("parent_id IS NOT DISTINCT FROM ?", toNullInt64(newParent)).
+		Where("position >= ?", targetPos).
+		Where("id <> ?", id).Exec(ctx); err != nil {
 		return models.Todo{}, err
 	}
 
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE todos SET board_id = ?, parent_id = ?, position = ? WHERE id = ?`,
-		targetBoard, toNullInt64(newParent), targetPos, id); err != nil {
+	if _, err := tx.NewUpdate().Model((*todo)(nil)).
+		Set("board_id = ?", targetBoard).
+		Set("parent_id = ?", toNullInt64(newParent)).
+		Set("position = ?", targetPos).
+		Where("id = ?", id).Exec(ctx); err != nil {
 		return models.Todo{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -799,7 +841,7 @@ func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Tod
 
 // checkCycle ensures assigning newParent as the todo's parent doesn't create a
 // loop (newParent must not be a descendant of id).
-func checkCycle(ctx context.Context, tx *sql.Tx, id, newParent int64) error {
+func checkCycle(ctx context.Context, run bun.IDB, id, newParent int64) error {
 	cur := newParent
 	seen := make(map[int64]struct{})
 	for cur != 0 {
@@ -811,7 +853,8 @@ func checkCycle(ctx context.Context, tx *sql.Tx, id, newParent int64) error {
 		}
 		seen[cur] = struct{}{}
 		var p sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT parent_id FROM todos WHERE id = ?`, cur).Scan(&p)
+		err := run.NewSelect().ColumnExpr("parent_id").TableExpr("todos").
+			Where("id = ?", cur).Scan(ctx, &p)
 		if errors.Is(err, sql.ErrNoRows) {
 			break
 		}
@@ -828,57 +871,64 @@ func checkCycle(ctx context.Context, tx *sql.Tx, id, newParent int64) error {
 
 // Delete removes a todo; ON DELETE CASCADE clears children and label links.
 func (d *DB) Delete(ctx context.Context, id int64) error {
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var parent sql.NullInt64
-	var pos int
-	var boardID int64
-	err = tx.QueryRowContext(ctx, `SELECT board_id, parent_id, position FROM todos WHERE id = ?`, id).
-		Scan(&boardID, &parent, &pos)
+	var cur todo
+	err = tx.NewSelect().Model(&cur).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM todos WHERE id = ?`, id); err != nil {
+	if _, err := tx.NewDelete().Model((*todo)(nil)).Where("id = ?", id).Exec(ctx); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE todos SET position = position - 1 WHERE board_id = ? AND parent_id IS ? AND position > ?`,
-		boardID, parent, pos); err != nil {
+	if _, err := tx.NewUpdate().Model((*todo)(nil)).
+		Set("position = position - 1").
+		Where("board_id = ?", cur.BoardID).
+		Where("parent_id IS NOT DISTINCT FROM ?", toNullInt64(cur.ParentID)).
+		Where("position > ?", cur.Position).
+		Exec(ctx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 // ListLabels returns all known labels, combining ad-hoc labels (attached to
-// todos) with any predefined labels. The result is de-duplicated and sorted.
+// todos) with any predefined labels. The two sets are fetched separately and
+// merged in Go (bun parenthesizes compound selects per-branch, which SQLite
+// rejects), then de-duplicated and sorted.
 func (d *DB) ListLabels(ctx context.Context) ([]string, error) {
-	rows, err := d.conn.QueryContext(ctx, `
-SELECT name FROM (
-    SELECT name FROM labels
-    UNION
-    SELECT name FROM predefined_labels
-)
-ORDER BY name`)
-	if err != nil {
+	var adhoc, predefined []string
+	if err := d.db.NewSelect().ColumnExpr("name").TableExpr("labels").Scan(ctx, &adhoc); err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			return nil, err
+	if err := d.db.NewSelect().ColumnExpr("name").TableExpr("predefined_labels").Scan(ctx, &predefined); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(adhoc)+len(predefined))
+	out := make([]string, 0, len(adhoc)+len(predefined))
+	for _, n := range adhoc {
+		if _, dup := seen[n]; dup {
+			continue
 		}
+		seen[n] = struct{}{}
 		out = append(out, n)
 	}
-	return out, rows.Err()
+	for _, n := range predefined {
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // AddPredefinedLabel records a label as predefined so it always appears in the
@@ -888,8 +938,8 @@ func (d *DB) AddPredefinedLabel(ctx context.Context, name string) error {
 	if name == "" {
 		return ErrInvalidInput
 	}
-	_, err := d.conn.ExecContext(ctx,
-		`INSERT INTO predefined_labels (name) VALUES (?) ON CONFLICT(name) DO NOTHING`, name)
+	_, err := d.db.NewInsert().Model(&predefinedLabel{Name: name}).
+		On("CONFLICT (name) DO NOTHING").Exec(ctx)
 	return err
 }
 
@@ -900,14 +950,14 @@ func (d *DB) RemovePredefinedLabel(ctx context.Context, name string) error {
 	if name == "" {
 		return ErrInvalidInput
 	}
-	_, err := d.conn.ExecContext(ctx, `DELETE FROM predefined_labels WHERE name = ?`, name)
+	_, err := d.db.NewDelete().Model((*predefinedLabel)(nil)).Where("name = ?", name).Exec(ctx)
 	return err
 }
 
 // resolvePosition returns the absolute insert position. If requested is nil the
 // item is appended to the end of the sibling group.
-func resolvePosition(ctx context.Context, tx *sql.Tx, boardID int64, parent *int64, requested *int) (int, error) {
-	count, err := countSiblings(ctx, tx, boardID, parent)
+func resolvePosition(ctx context.Context, run bun.IDB, boardID int64, parent *int64, requested *int) (int, error) {
+	count, err := countSiblings(ctx, run, boardID, parent)
 	if err != nil {
 		return 0, err
 	}
@@ -920,27 +970,32 @@ func resolvePosition(ctx context.Context, tx *sql.Tx, boardID int64, parent *int
 // countSiblings counts todos sharing the same (board, parent). Both scopes are
 // required: parent_id alone is ambiguous once multiple boards exist, since every
 // board has its own set of root todos (parent_id IS NULL).
-func countSiblings(ctx context.Context, tx *sql.Tx, boardID int64, parent *int64) (int, error) {
+func countSiblings(ctx context.Context, run bun.IDB, boardID int64, parent *int64) (int, error) {
 	var c int
-	err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM todos WHERE board_id = ? AND parent_id IS ?`,
-		boardID, toNullInt64(parent)).Scan(&c)
+	err := run.NewSelect().ColumnExpr("COUNT(*)").TableExpr("todos").
+		Where("board_id = ?", boardID).
+		Where("parent_id IS NOT DISTINCT FROM ?", toNullInt64(parent)).
+		Scan(ctx, &c)
 	return c, err
 }
 
 // shiftSiblingsAfter increases positions of siblings that come at-or-after pos,
 // skipping the inserted todo itself (to avoid a unique-ish collision if one existed).
-func shiftSiblingsAfter(ctx context.Context, tx *sql.Tx, boardID int64, parent *int64, pos, delta int, skipID int64) error {
-	_, err := tx.ExecContext(ctx,
-		`UPDATE todos SET position = position + ? WHERE board_id = ? AND parent_id IS ? AND position >= ? AND id <> ?`,
-		delta, boardID, toNullInt64(parent), pos, skipID)
+func shiftSiblingsAfter(ctx context.Context, run bun.IDB, boardID int64, parent *int64, pos, delta int, skipID int64) error {
+	_, err := run.NewUpdate().Model((*todo)(nil)).
+		Set("position = position + ?", delta).
+		Where("board_id = ?", boardID).
+		Where("parent_id IS NOT DISTINCT FROM ?", toNullInt64(parent)).
+		Where("position >= ?", pos).
+		Where("id <> ?", skipID).
+		Exec(ctx)
 	return err
 }
 
 // setLabelsTx replaces the set of labels for a todo, creating any unknown
 // label names as needed.
-func setLabelsTx(ctx context.Context, tx *sql.Tx, todoID int64, labels []string) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM todo_labels WHERE todo_id = ?`, todoID); err != nil {
+func setLabelsTx(ctx context.Context, run bun.IDB, todoID int64, labels []string) error {
+	if _, err := run.NewDelete().Model((*todoLabel)(nil)).Where("todo_id = ?", todoID).Exec(ctx); err != nil {
 		return err
 	}
 	seen := make(map[string]struct{}, len(labels))
@@ -954,15 +1009,13 @@ func setLabelsTx(ctx context.Context, tx *sql.Tx, todoID int64, labels []string)
 		}
 		seen[l] = struct{}{}
 		// Upsert the label and fetch its id in one round-trip via RETURNING.
-		var labelID int64
-		if err := tx.QueryRowContext(ctx,
-			`INSERT INTO labels (name) VALUES (?)
-			 ON CONFLICT(name) DO UPDATE SET name = excluded.name
-			 RETURNING id`, l).Scan(&labelID); err != nil {
+		var lid int64
+		if err := run.NewInsert().Model(&label{Name: l}).
+			On("CONFLICT (name) DO UPDATE SET name = excluded.name").
+			Returning("id").Scan(ctx, &lid); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO todo_labels (todo_id, label_id) VALUES (?, ?)`, todoID, labelID); err != nil {
+		if _, err := run.NewInsert().Model(&todoLabel{TodoID: todoID, LabelID: lid}).Ignore().Exec(ctx); err != nil {
 			return err
 		}
 	}
@@ -978,42 +1031,34 @@ func toNullInt64(p *int64) any {
 
 // ListBoards returns every board ordered by position.
 func (d *DB) ListBoards(ctx context.Context) ([]models.Board, error) {
-	rows, err := d.conn.QueryContext(ctx,
-		`SELECT id, name, position FROM boards ORDER BY position, id`)
-	if err != nil {
+	var bs []board
+	if err := d.db.NewSelect().Model(&bs).OrderExpr("position, id").Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []models.Board
-	for rows.Next() {
-		var b models.Board
-		if err := rows.Scan(&b.ID, &b.Name, &b.Position); err != nil {
-			return nil, err
-		}
-		out = append(out, b)
+	out := make([]models.Board, len(bs))
+	for i, b := range bs {
+		out[i] = b.toModel()
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // GetBoard returns a single board by id.
 func (d *DB) GetBoard(ctx context.Context, id int64) (models.Board, error) {
-	var b models.Board
-	err := d.conn.QueryRowContext(ctx,
-		`SELECT id, name, position FROM boards WHERE id = ?`, id).
-		Scan(&b.ID, &b.Name, &b.Position)
+	var b board
+	err := d.db.NewSelect().Model(&b).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Board{}, ErrBoardNotFound
 	}
 	if err != nil {
 		return models.Board{}, err
 	}
-	return b, nil
+	return b.toModel(), nil
 }
 
 // CreateBoard inserts a board. If Position is nil it is appended after the
 // current max position; later boards are shifted to keep ordering gapless.
 func (d *DB) CreateBoard(ctx context.Context, in models.CreateBoard) (models.Board, error) {
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.Board{}, err
 	}
@@ -1022,40 +1067,39 @@ func (d *DB) CreateBoard(ctx context.Context, in models.CreateBoard) (models.Boa
 	var pos int
 	if in.Position != nil {
 		pos = max(0, *in.Position)
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE boards SET position = position + 1 WHERE position >= ?`, pos); err != nil {
+		if _, err := tx.NewUpdate().Model((*board)(nil)).
+			Set("position = position + 1").Where("position >= ?", pos).
+			Exec(ctx); err != nil {
 			return models.Board{}, err
 		}
 	} else {
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position)+1, 0) FROM boards`).Scan(&pos); err != nil {
+		if err := tx.NewSelect().ColumnExpr("COALESCE(MAX(position)+1, 0)").TableExpr("boards").
+			Scan(ctx, &pos); err != nil {
 			return models.Board{}, err
 		}
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO boards (name, position) VALUES (?, ?)`, in.Name, pos)
-	if err != nil {
-		return models.Board{}, err
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
+	b := board{Name: in.Name, Position: pos}
+	if err := tx.NewInsert().Model(&b).Returning("id").Scan(ctx, &b.ID); err != nil {
 		return models.Board{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return models.Board{}, err
 	}
-	return d.GetBoard(ctx, id)
+	return d.GetBoard(ctx, b.ID)
 }
 
 // UpdateBoard applies a partial update to a board. Position changes shift
 // siblings to keep ordering gapless.
 func (d *DB) UpdateBoard(ctx context.Context, id int64, in models.UpdateBoard) (models.Board, error) {
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.Board{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var curPos int
-	err = tx.QueryRowContext(ctx, `SELECT position FROM boards WHERE id = ?`, id).Scan(&curPos)
+	err = tx.NewSelect().ColumnExpr("position").TableExpr("boards").
+		Where("id = ?", id).Scan(ctx, &curPos)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Board{}, ErrBoardNotFound
 	}
@@ -1064,31 +1108,38 @@ func (d *DB) UpdateBoard(ctx context.Context, id int64, in models.UpdateBoard) (
 	}
 
 	if in.Name != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE boards SET name = ? WHERE id = ?`, *in.Name, id); err != nil {
+		if _, err := tx.NewUpdate().Model((*board)(nil)).
+			Set("name = ?", *in.Name).Where("id = ?", id).Exec(ctx); err != nil {
 			return models.Board{}, err
 		}
 	}
 	if in.Position != nil {
 		var maxPos int
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position), 0) FROM boards`).Scan(&maxPos); err != nil {
+		if err := tx.NewSelect().ColumnExpr("COALESCE(MAX(position), 0)").TableExpr("boards").
+			Scan(ctx, &maxPos); err != nil {
 			return models.Board{}, err
 		}
 		target := max(0, min(*in.Position, maxPos))
 		if target != curPos {
 			if target > curPos {
-				if _, err := tx.ExecContext(ctx,
-					`UPDATE boards SET position = position - 1 WHERE position > ? AND position <= ? AND id <> ?`,
-					curPos, target, id); err != nil {
+				if _, err := tx.NewUpdate().Model((*board)(nil)).
+					Set("position = position - 1").
+					Where("position > ?", curPos).
+					Where("position <= ?", target).
+					Where("id <> ?", id).Exec(ctx); err != nil {
 					return models.Board{}, err
 				}
 			} else {
-				if _, err := tx.ExecContext(ctx,
-					`UPDATE boards SET position = position + 1 WHERE position >= ? AND position < ? AND id <> ?`,
-					target, curPos, id); err != nil {
+				if _, err := tx.NewUpdate().Model((*board)(nil)).
+					Set("position = position + 1").
+					Where("position >= ?", target).
+					Where("position < ?", curPos).
+					Where("id <> ?", id).Exec(ctx); err != nil {
 					return models.Board{}, err
 				}
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE boards SET position = ? WHERE id = ?`, target, id); err != nil {
+			if _, err := tx.NewUpdate().Model((*board)(nil)).
+				Set("position = ?", target).Where("id = ?", id).Exec(ctx); err != nil {
 				return models.Board{}, err
 			}
 		}
@@ -1102,43 +1153,36 @@ func (d *DB) UpdateBoard(ctx context.Context, id int64, in models.UpdateBoard) (
 // DeleteBoard removes a board and (via ON DELETE CASCADE) all of its todos.
 // The last remaining board cannot be deleted.
 func (d *DB) DeleteBoard(ctx context.Context, id int64) error {
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM boards`).Scan(&count); err != nil {
+	if err := tx.NewSelect().ColumnExpr("COUNT(*)").TableExpr("boards").Scan(ctx, &count); err != nil {
 		return err
 	}
 	if count <= 1 {
 		return ErrLastBoard
 	}
 	var pos int
-	err = tx.QueryRowContext(ctx, `SELECT position FROM boards WHERE id = ?`, id).Scan(&pos)
+	err = tx.NewSelect().ColumnExpr("position").TableExpr("boards").
+		Where("id = ?", id).Scan(ctx, &pos)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrBoardNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM boards WHERE id = ?`, id); err != nil {
+	if _, err := tx.NewDelete().Model((*board)(nil)).Where("id = ?", id).Exec(ctx); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE boards SET position = position - 1 WHERE position > ?`, pos); err != nil {
+	if _, err := tx.NewUpdate().Model((*board)(nil)).
+		Set("position = position - 1").Where("position > ?", pos).Exec(ctx); err != nil {
 		return err
 	}
 	return tx.Commit()
-}
-
-func nullableToPtr(n sql.NullInt64) *int64 {
-	if !n.Valid {
-		return nil
-	}
-	v := n.Int64
-	return &v
 }
 
 func sameParent(a, b *int64) bool {
