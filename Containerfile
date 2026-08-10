@@ -11,7 +11,7 @@ WORKDIR /src
 # Delta 2: no brotli/gzip — this project's go generate does not pre-compress.
 RUN apk add --no-cache nodejs-current pnpm
 
-COPY web/package.json web/pnpm-lock.yaml ./web/
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./web/
 RUN pnpm install --frozen-lockfile --dir web
 
 COPY . .
