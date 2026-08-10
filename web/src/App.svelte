@@ -31,15 +31,6 @@
 
   <div class="list-toolbar">
     <FilterBar />
-    <label class="toggle">
-      <input
-        type="checkbox"
-        checked={store.showCompleted}
-        onchange={(e) => store.setShowCompleted(e.target.checked)}
-      />
-      Show completed
-      {#if store.completedCount}<span class="count">({store.completedCount})</span>{/if}
-    </label>
   </div>
 
   {#if store.filterActive && roots.length === 0}
@@ -54,7 +45,9 @@
     role="list"
     ondrop={(e) => {
       e.preventDefault();
-      store.move(id, { parentId: null, position: store.childrenOf(null).length });
+      const id = Number(e.dataTransfer.getData('text/x-todo-id'));
+      // No position => server appends at the end of the root siblings.
+      if (id) store.move(id, { parentId: null });
     }}
     ondragover={(e) => {
       // Allow drops; if the pointer is over a child TodoItem it will stop
@@ -100,15 +93,6 @@
     flex-direction: column;
     gap: 8px;
   }
-  .toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--muted);
-    font-size: 13px;
-    cursor: pointer;
-    user-select: none;
-  }
   .empty-filter {
     padding: 24px 20px;
     display: flex;
@@ -116,13 +100,6 @@
     gap: 12px;
     color: var(--muted);
     font-size: 13px;
-  }
-  .toggle input {
-    accent-color: var(--accent);
-    cursor: pointer;
-  }
-  .count {
-    color: var(--muted);
   }
   .roots {
     padding: 12px 20px;

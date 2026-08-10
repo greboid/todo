@@ -16,12 +16,22 @@ async function req(path, { body, method, params } = {}) {
   });
   if (res.status === 204) return null;
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || `request failed: ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(json.error || `request failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return json;
 }
 
 export const api = {
-  listTodos: (boardId) => req('/todos', { params: boardId ? { boardId } : undefined }),
+  listTodos: (boardId, filter, today) => {
+    const params = {};
+    if (boardId) params.boardId = boardId;
+    if (filter) params.filter = filter;
+    if (today) params.today = today;
+    return req('/todos', { params: Object.keys(params).length ? params : undefined });
+  },
   createTodo: (data) => req('/todos', { method: 'POST', body: data }),
   getTodo: (id) => req(`/todos/${id}`),
   updateTodo: (id, data) => req(`/todos/${id}`, { method: 'PATCH', body: data }),
