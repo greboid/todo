@@ -56,31 +56,34 @@ func TestParse(t *testing.T) {
 		{"daily bare", "daily", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1})}, ""},
 		{"weekly bare", "weekly", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1})}, ""},
 
-		// recurrence, explicit
+		// recurrence, explicit. A recurrence without a starting date seeds its
+		// first due date to the first occurrence on/after today (2026-08-09, a
+		// Sunday): plain intervals keep today, targeted rules advance to the
+		// next matching day (e.g. "every last friday" -> 2026-08-28).
 		{"every day", "every day", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1})}, ""},
 		{"every 3 days", "every 3 days", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 3})}, ""},
 		{"every week", "every week", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1})}, ""},
 		{
 			"every 2 weeks on mon wed", "every 2 weeks on mon, wed",
-			Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 2, Weekdays: []int{1, 3}})},
+			Schedule{DueDate: "2026-08-10", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 2, Weekdays: []int{1, 3}})},
 			"",
 		},
 		{
 			"every week on mon wed fri", "every week on mon, wed, fri",
-			Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1, Weekdays: []int{1, 3, 5}})},
+			Schedule{DueDate: "2026-08-10", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1, Weekdays: []int{1, 3, 5}})},
 			"",
 		},
-		{"every weekday", "every weekday", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1, Weekdays: []int{1, 2, 3, 4, 5}})}, ""},
+		{"every weekday", "every weekday", Schedule{DueDate: "2026-08-10", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1, Weekdays: []int{1, 2, 3, 4, 5}})}, ""},
 		{"weekends", "every weekend", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1, Weekdays: []int{0, 6}})}, ""},
-		{"every other friday", "every other friday", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 2, Weekdays: []int{5}})}, ""},
+		{"every other friday", "every other friday", Schedule{DueDate: "2026-08-14", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 2, Weekdays: []int{5}})}, ""},
 		{"every quarter", "every quarter", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 3})}, ""},
 		{"every fortnight", "every fortnight", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 2})}, ""},
 		{"every month", "every month", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1})}, ""},
-		{"every month on the 15th", "every month on the 15th", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, MonthDays: []int{15}})}, ""},
-		{"every month on 2 15 27", "every month on 2, 15, 27", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, MonthDays: []int{2, 15, 27}})}, ""},
-		{"every month last day", "every month on the last day", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, LastDay: true})}, ""},
-		{"every 2nd tuesday", "every 2nd tuesday", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, NthWeekday: &models.NthWeekday{N: 2, Weekday: 2}})}, ""},
-		{"last friday", "every last friday", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, NthWeekday: &models.NthWeekday{N: -1, Weekday: 5}})}, ""},
+		{"every month on the 15th", "every month on the 15th", Schedule{DueDate: "2026-08-15", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, MonthDays: []int{15}})}, ""},
+		{"every month on 2 15 27", "every month on 2, 15, 27", Schedule{DueDate: "2026-08-15", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, MonthDays: []int{2, 15, 27}})}, ""},
+		{"every month last day", "every month on the last day", Schedule{DueDate: "2026-08-31", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, LastDay: true})}, ""},
+		{"every 2nd tuesday", "every 2nd tuesday", Schedule{DueDate: "2026-08-11", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, NthWeekday: &models.NthWeekday{N: 2, Weekday: 2}})}, ""},
+		{"last friday", "every last friday", Schedule{DueDate: "2026-08-28", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, NthWeekday: &models.NthWeekday{N: -1, Weekday: 5}})}, ""},
 		{"every year", "every year", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "yearly", Interval: 1})}, ""},
 		{"every bang", "every! day", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1, FromCompletion: true})}, ""},
 
@@ -244,4 +247,73 @@ func scheduleEqual(a, b Schedule) bool {
 		return false
 	}
 	return true
+}
+
+// TestFirstDue locks in the first-occurrence alignment used by Parse when a
+// recurrence has no explicit starting date: targeted rules land on their next
+// matching day on/after today, plain intervals keep today. now is 2026-08-09
+// (a Sunday); Aug 2026 starts on a Saturday, so its last Friday is Aug 28.
+func TestFirstDue(t *testing.T) {
+	cases := []struct {
+		name string
+		rc   models.Recurrence
+		want string
+	}{
+		{"plain daily", models.Recurrence{Frequency: "daily", Interval: 1}, "2026-08-09"},
+		{"plain weekly", models.Recurrence{Frequency: "weekly", Interval: 1}, "2026-08-09"},
+		{"plain monthly", models.Recurrence{Frequency: "monthly", Interval: 1}, "2026-08-09"},
+		{"plain yearly", models.Recurrence{Frequency: "yearly", Interval: 1}, "2026-08-09"},
+		{"weekdays mon wed fri", models.Recurrence{Frequency: "weekly", Interval: 1, Weekdays: []int{1, 3, 5}}, "2026-08-10"},
+		{"weekend today is target", models.Recurrence{Frequency: "weekly", Interval: 1, Weekdays: []int{0, 6}}, "2026-08-09"},
+		{"every other friday", models.Recurrence{Frequency: "weekly", Interval: 2, Weekdays: []int{5}}, "2026-08-14"},
+		{"month day 15", models.Recurrence{Frequency: "monthly", Interval: 1, MonthDays: []int{15}}, "2026-08-15"},
+		{"month day list past today", models.Recurrence{Frequency: "monthly", Interval: 1, MonthDays: []int{2, 15, 27}}, "2026-08-15"},
+		{"month day is today", models.Recurrence{Frequency: "monthly", Interval: 1, MonthDays: []int{9}}, "2026-08-09"},
+		{"last day of month", models.Recurrence{Frequency: "monthly", Interval: 1, LastDay: true}, "2026-08-31"},
+		{"2nd tuesday", models.Recurrence{Frequency: "monthly", Interval: 1, NthWeekday: &models.NthWeekday{N: 2, Weekday: 2}}, "2026-08-11"},
+		{"last friday", models.Recurrence{Frequency: "monthly", Interval: 1, NthWeekday: &models.NthWeekday{N: -1, Weekday: 5}}, "2026-08-28"},
+		{"1st saturday rolls to next month", models.Recurrence{Frequency: "monthly", Interval: 1, NthWeekday: &models.NthWeekday{N: 1, Weekday: 6}}, "2026-09-05"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := FirstDue(tc.rc, now)
+			if !ok {
+				t.Fatalf("FirstDue(%+v): ok=false, want true", tc.rc)
+			}
+			if got != tc.want {
+				t.Errorf("FirstDue(%+v) = %q, want %q", tc.rc, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNextDue locks in the strictly-after advance used by the data layer when a
+// recurring todo is completed (clone-next), including the EndDate window cutoff
+// and FromCompletion ("every!") advancing from now instead of the stored date.
+func TestNextDue(t *testing.T) {
+	cases := []struct {
+		name      string
+		current   string
+		rc        models.Recurrence
+		wantNext  string
+		wantRecur bool
+	}{
+		{"daily next day", "2026-08-15", models.Recurrence{Frequency: "daily", Interval: 1}, "2026-08-16", true},
+		{"weekly mon wed fri", "2026-08-10", models.Recurrence{Frequency: "weekly", Interval: 1, Weekdays: []int{1, 3, 5}}, "2026-08-12", true},
+		{"last friday into next month", "2026-08-28", models.Recurrence{Frequency: "monthly", Interval: 1, NthWeekday: &models.NthWeekday{N: -1, Weekday: 5}}, "2026-09-25", true},
+		{"enddate window closed", "2026-08-15", models.Recurrence{Frequency: "daily", Interval: 1, EndDate: "2026-08-15"}, "", false},
+		{"enddate exact boundary", "2026-08-14", models.Recurrence{Frequency: "daily", Interval: 1, EndDate: "2026-08-15"}, "2026-08-15", true},
+		{"from completion uses now", "2026-08-15", models.Recurrence{Frequency: "daily", Interval: 1, FromCompletion: true}, "2026-08-10", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			next, recurring, err := NextDue(tc.current, tc.rc, now)
+			if err != nil {
+				t.Fatalf("NextDue(%q, %+v): unexpected error: %v", tc.current, tc.rc, err)
+			}
+			if next != tc.wantNext || recurring != tc.wantRecur {
+				t.Errorf("NextDue(%q, %+v) = (%q, %v), want (%q, %v)", tc.current, tc.rc, next, recurring, tc.wantNext, tc.wantRecur)
+			}
+		})
+	}
 }

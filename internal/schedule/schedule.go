@@ -627,13 +627,23 @@ func Parse(raw string, now time.Time) (Schedule, error) {
 		recurrence.FromCompletion = fromCompletion
 
 		cl := parseClauses(clausesStr)
-		dueDate := iso(now)
+		var dueDate string
 		if cl.start != "" {
 			dd, ok := ParseDate(cl.start, now)
 			if !ok {
 				return Schedule{}, fmt.Errorf("couldn't read start date %q", cl.start)
 			}
 			dueDate = dd
+		} else {
+			// No explicit start: align the first due date to the recurrence's
+			// first occurrence on or after today, so a rule like "every last
+			// friday" lands on the next last Friday instead of today. Plain
+			// intervals (every day/week/month/year) keep today as the seed.
+			if dd, ok := FirstDue(*recurrence, now); ok {
+				dueDate = dd
+			} else {
+				dueDate = iso(now)
+			}
 		}
 		switch {
 		case cl.end != "":
@@ -657,6 +667,204 @@ func Parse(raw string, now time.Time) (Schedule, error) {
 		return Schedule{}, fmt.Errorf("couldn't read a date from %q", strings.TrimSpace(raw))
 	}
 	return Schedule{DueDate: dueDate}, nil
+}
+
+// ----------------------------------------------------------------------------
+// recurrence advance (date engine)
+// ----------------------------------------------------------------------------
+//
+// The date engine turns a Recurrence into concrete dates. NextDue advances a
+// stored due date to its next occurrence (used by the data layer when a
+// recurring todo is completed); FirstDue resolves the initial due date when a
+// recurrence is created without an explicit starting date. Both share one
+// advance core so the parse path and the completion path agree.
+
+// ErrAdvance indicates a recurrence rule could not be turned into a date
+// (unknown frequency or no reachable target). It is unreachable for rules that
+// passed parseCore/Valid; the data layer wraps it so it still maps to HTTP 400.
+var ErrAdvance = errors.New("recurrence rule cannot be advanced")
+
+// NextDue returns the next due date strictly after current per rc. With
+// FromCompletion set (Todoist's "every!") it advances from now (the completion
+// date) instead of current. recurring is false when the next occurrence would
+// fall past rc.EndDate, signalling the recurrence window has closed.
+func NextDue(current string, rc models.Recurrence, now time.Time) (next string, recurring bool, err error) {
+	const layout = "2006-01-02"
+	base, perr := time.Parse(layout, current)
+	if perr != nil || rc.FromCompletion {
+		base = now
+	}
+	t, err := advance(base, rc, false)
+	if err != nil {
+		return "", false, err
+	}
+	if rc.EndDate != "" && iso(t) > rc.EndDate {
+		return "", false, nil
+	}
+	return iso(t), true, nil
+}
+
+// FirstDue returns the first due date for rc on or after now. A recurrence
+// created without an explicit starting date uses this so a targeted rule such
+// as "every last friday" or "every month on the 15th" lands on its first real
+// occurrence rather than today. Plain intervals (every day/week/month/year)
+// resolve to now itself. EndDate is not consulted: the first occurrence is the
+// due date even when it already lies past the recurrence window. ok is false
+// only for a malformed rule, which cannot reach here from Parse.
+func FirstDue(rc models.Recurrence, now time.Time) (due string, ok bool) {
+	t, err := advance(now, rc, true)
+	if err != nil {
+		return "", false
+	}
+	return iso(t), true
+}
+
+// advance dispatches a single recurrence step from base. When inclusive the
+// base date itself qualifies (FirstDue); otherwise the result is strictly
+// after base (NextDue).
+func advance(base time.Time, rc models.Recurrence, inclusive bool) (time.Time, error) {
+	switch rc.Frequency {
+	case "daily":
+		if inclusive {
+			return base, nil
+		}
+		return base.AddDate(0, 0, rc.Interval), nil
+	case "weekly":
+		return nextWeekly(base, rc, inclusive)
+	case "monthly":
+		return nextMonthly(base, rc, inclusive)
+	case "yearly":
+		if inclusive {
+			return base, nil
+		}
+		return addYears(base, rc.Interval), nil
+	default:
+		return time.Time{}, fmt.Errorf("%w: unknown frequency %q", ErrAdvance, rc.Frequency)
+	}
+}
+
+// nextWeekly advances to the next target weekday. With no weekdays set it is a
+// plain every-N-weeks step. With weekdays set, active weeks are every
+// rc.Interval weeks anchored on base's week: a date is due iff its weekday is a
+// target and its week index (whole weeks since base's Sunday) is a multiple of
+// rc.Interval, which handles "every 2 weeks on mon, wed". When inclusive and
+// base itself is a target weekday, base is returned (its week is always active).
+func nextWeekly(base time.Time, rc models.Recurrence, inclusive bool) (time.Time, error) {
+	if len(rc.Weekdays) == 0 {
+		if inclusive {
+			return base, nil
+		}
+		return base.AddDate(0, 0, 7*rc.Interval), nil
+	}
+	targets := make(map[int]bool, len(rc.Weekdays))
+	for _, w := range rc.Weekdays {
+		targets[w] = true
+	}
+	baseWD := int(base.Weekday())
+	// base's own week is week 0, always a multiple of rc.Interval, so a target
+	// weekday landing on base is the first occurrence.
+	if inclusive && targets[baseWD] {
+		return base, nil
+	}
+	for d := 1; d <= 7*rc.Interval; d++ {
+		c := base.AddDate(0, 0, d)
+		if !targets[int(c.Weekday())] {
+			continue
+		}
+		weeks := (d + baseWD) / 7 // whole weeks since base's Sunday
+		if weeks%rc.Interval == 0 {
+			return c, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("%w: no weekly target after base", ErrAdvance)
+}
+
+// nextMonthly advances to the next month-level target. Active months are every
+// rc.Interval months from base's month; within each, candidate days come from
+// MonthDays, LastDay, NthWeekday, or (if none set) the base day-of-month. The
+// smallest candidate on or after base (inclusive) or strictly after base wins.
+func nextMonthly(base time.Time, rc models.Recurrence, inclusive bool) (time.Time, error) {
+	for offset := 0; offset <= 1200; offset++ {
+		if offset%rc.Interval != 0 {
+			continue
+		}
+		year := base.Year() + (int(base.Month())-1+offset)/12
+		month := time.Month((int(base.Month())-1+offset)%12 + 1)
+		for _, c := range monthCandidates(year, month, base, rc) {
+			if c.After(base) || (inclusive && c.Equal(base)) {
+				return c, nil
+			}
+		}
+	}
+	return time.Time{}, fmt.Errorf("%w: no monthly target after base", ErrAdvance)
+}
+
+// monthCandidates builds the set of due days in (year, month) for a monthly
+// rule, sorted ascending. Targets out of range for the month are dropped.
+func monthCandidates(year int, month time.Month, base time.Time, rc models.Recurrence) []time.Time {
+	loc := base.Location()
+	dim := lastDayOfMonth(year, month)
+	var cands []time.Time
+	addDay := func(d int) {
+		if d >= 1 && d <= dim {
+			cands = append(cands, time.Date(year, month, d, 0, 0, 0, 0, loc))
+		}
+	}
+	for _, d := range rc.MonthDays {
+		addDay(d)
+	}
+	if rc.LastDay {
+		addDay(dim)
+	}
+	if rc.NthWeekday != nil {
+		addDay(nthWeekdayDay(year, month, rc.NthWeekday))
+	}
+	// No explicit targets: keep the base day-of-month (plain "every month"),
+	// clamping to the last day when the month is shorter (e.g. Jan 31 -> Feb 28).
+	if len(rc.MonthDays) == 0 && !rc.LastDay && rc.NthWeekday == nil {
+		d := base.Day()
+		if d > dim {
+			d = dim
+		}
+		cands = append(cands, time.Date(year, month, d, 0, 0, 0, 0, loc))
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].Before(cands[j]) })
+	return cands
+}
+
+// nthWeekdayDay returns the day-of-month of the Nth occurrence of a weekday in
+// (year, month), or the last occurrence when n == -1. Returns 0 if that
+// ordinal does not exist in the month (e.g. a 5th Monday).
+func nthWeekdayDay(year int, month time.Month, nw *models.NthWeekday) int {
+	dim := lastDayOfMonth(year, month)
+	if nw.N == -1 {
+		for d := dim; d >= 1; d-- {
+			if int(time.Date(year, month, d, 0, 0, 0, 0, time.UTC).Weekday()) == nw.Weekday {
+				return d
+			}
+		}
+		return 0
+	}
+	count := 0
+	for d := 1; d <= dim; d++ {
+		if int(time.Date(year, month, d, 0, 0, 0, 0, time.UTC).Weekday()) == nw.Weekday {
+			count++
+			if count == nw.N {
+				return d
+			}
+		}
+	}
+	return 0
+}
+
+// addYears shifts base by years, clamping Feb 29 overflow (Go's AddDate alone
+// would land on Mar 1 in non-leap years).
+func addYears(base time.Time, years int) time.Time {
+	t := base.AddDate(years, 0, 0)
+	if t.Day() != base.Day() {
+		t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location()).AddDate(0, 0, -1)
+	}
+	return t
 }
 
 // ----------------------------------------------------------------------------
