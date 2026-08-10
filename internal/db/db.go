@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/greboid/todo/internal/models"
+	"github.com/greboid/todo/internal/schedule"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -476,160 +477,18 @@ func (d *DB) spawnNextIfRecurring(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 
-// nextDueDate computes the next due date strictly after the current one per a
-// Todoist-style recurrence rule. With rc.FromCompletion set (Todoist's
-// "every!") the recurrence advances from today (the completion date) rather
-// than the stored due date. If the next occurrence would fall after rc.EndDate
-// the recurrence window has closed and recurring is false, so the caller skips
-// spawning a clone. An unknown frequency errors out defensively even though
-// validation ran at the API layer.
+// nextDueDate advances current to the next due date strictly after it per a
+// recurrence rule, advancing from today (the completion date) when
+// FromCompletion is set. The date-advance engine lives in package schedule so
+// the parse path and this completion path share one implementation; this
+// wrapper feeds a deterministic now and preserves the ErrInvalidInput mapping
+// for HTTP 400.
 func nextDueDate(current string, rc models.Recurrence) (next string, recurring bool, err error) {
-	const layout = "2006-01-02"
-	base, perr := time.Parse(layout, current)
-	if perr != nil || rc.FromCompletion {
-		base = time.Now().UTC()
-	}
-	var t time.Time
-	switch rc.Frequency {
-	case "daily":
-		t = base.AddDate(0, 0, rc.Interval)
-	case "weekly":
-		t, err = nextWeekly(base, rc)
-	case "monthly":
-		t, err = nextMonthly(base, rc)
-	case "yearly":
-		t = addYears(base, rc.Interval)
-	default:
-		return "", false, fmt.Errorf("%w: unknown frequency %q", ErrInvalidInput, rc.Frequency)
-	}
+	next, recurring, err = schedule.NextDue(current, rc, time.Now().UTC())
 	if err != nil {
-		return "", false, err
+		return "", false, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
-	if rc.EndDate != "" && t.Format(layout) > rc.EndDate {
-		return "", false, nil // recurrence window closed
-	}
-	return t.Format(layout), true, nil
-}
-
-// nextWeekly advances to the next target weekday. With no weekdays set it is a
-// plain every-N-weeks step. With weekdays set, active weeks are every
-// rc.Interval weeks anchored on base's week: a date is due iff its weekday is a
-// target and its week index (whole weeks since base's Sunday) is a multiple of
-// rc.Interval. This correctly handles "every 2 weeks on mon, wed".
-func nextWeekly(base time.Time, rc models.Recurrence) (time.Time, error) {
-	if len(rc.Weekdays) == 0 {
-		return base.AddDate(0, 0, 7*rc.Interval), nil
-	}
-	targets := make(map[int]bool, len(rc.Weekdays))
-	for _, w := range rc.Weekdays {
-		targets[w] = true
-	}
-	baseWD := int(base.Weekday())
-	for d := 1; d <= 7*rc.Interval; d++ {
-		c := base.AddDate(0, 0, d)
-		if !targets[int(c.Weekday())] {
-			continue
-		}
-		weeks := (d + baseWD) / 7 // whole weeks since base's Sunday
-		if weeks%rc.Interval == 0 {
-			return c, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("%w: no weekly target after base", ErrInvalidInput)
-}
-
-// nextMonthly advances to the next month-level target. Active months are every
-// rc.Interval months from base's month; within each, candidate days come from
-// MonthDays, LastDay, NthWeekday, or (if none set) the base day-of-month. The
-// smallest candidate strictly after base wins.
-func nextMonthly(base time.Time, rc models.Recurrence) (time.Time, error) {
-	for offset := 0; offset <= 1200; offset++ {
-		if offset%rc.Interval != 0 {
-			continue
-		}
-		year := base.Year() + (int(base.Month())-1+offset)/12
-		month := time.Month((int(base.Month())-1+offset)%12 + 1)
-		for _, c := range monthCandidates(year, month, base, rc) {
-			if c.After(base) {
-				return c, nil
-			}
-		}
-	}
-	return time.Time{}, fmt.Errorf("%w: no monthly target after base", ErrInvalidInput)
-}
-
-// monthCandidates builds the set of due days in (year, month) for a monthly
-// rule, sorted ascending. Targets out of range for the month are dropped.
-func monthCandidates(year int, month time.Month, base time.Time, rc models.Recurrence) []time.Time {
-	loc := base.Location()
-	dim := daysInMonthYM(year, month)
-	var cands []time.Time
-	addDay := func(d int) {
-		if d >= 1 && d <= dim {
-			cands = append(cands, time.Date(year, month, d, 0, 0, 0, 0, loc))
-		}
-	}
-	for _, d := range rc.MonthDays {
-		addDay(d)
-	}
-	if rc.LastDay {
-		addDay(dim)
-	}
-	if rc.NthWeekday != nil {
-		addDay(nthWeekdayDay(year, month, rc.NthWeekday))
-	}
-	// No explicit targets: keep the base day-of-month (plain "every month"),
-	// clamping to the last day when the month is shorter (e.g. Jan 31 -> Feb 28).
-	if len(rc.MonthDays) == 0 && !rc.LastDay && rc.NthWeekday == nil {
-		d := base.Day()
-		if d > dim {
-			d = dim
-		}
-		cands = append(cands, time.Date(year, month, d, 0, 0, 0, 0, loc))
-	}
-	sort.Slice(cands, func(i, j int) bool { return cands[i].Before(cands[j]) })
-	return cands
-}
-
-// nthWeekdayDay returns the day-of-month of the Nth occurrence of a weekday in
-// (year, month), or the last occurrence when n == -1. Returns 0 if that
-// ordinal does not exist in the month (e.g. a 5th Monday).
-func nthWeekdayDay(year int, month time.Month, nw *models.NthWeekday) int {
-	dim := daysInMonthYM(year, month)
-	if nw.N == -1 {
-		for d := dim; d >= 1; d-- {
-			if int(time.Date(year, month, d, 0, 0, 0, 0, time.UTC).Weekday()) == nw.Weekday {
-				return d
-			}
-		}
-		return 0
-	}
-	count := 0
-	for d := 1; d <= dim; d++ {
-		if int(time.Date(year, month, d, 0, 0, 0, 0, time.UTC).Weekday()) == nw.Weekday {
-			count++
-			if count == nw.N {
-				return d
-			}
-		}
-	}
-	return 0
-}
-
-// addYears shifts base by years, clamping Feb 29 overflow (Go's AddDate alone
-// would land on Mar 1 in non-leap years).
-func addYears(base time.Time, years int) time.Time {
-	t := base.AddDate(years, 0, 0)
-	if t.Day() != base.Day() {
-		t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location()).AddDate(0, 0, -1)
-	}
-	return t
-}
-
-// daysInMonthYM returns the number of days in (year, month).
-func daysInMonthYM(year int, month time.Month) int {
-	firstOfNext := time.Date(year, month+1, 1, 0, 0, 0, 0, time.UTC)
-	return firstOfNext.AddDate(0, 0, -1).Day()
+	return next, recurring, nil
 }
 
 // toNullString maps a pointer string to a bind value: nil -> nil (NULL), else
