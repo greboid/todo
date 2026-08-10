@@ -1,0 +1,76 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Vet, build, and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # Build the SPA into internal/ui/dist first so the go:embed in the Go
+      # steps below has its input.
+      - name: Build SPA
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Go vet
+        run: go vet ./...
+      - name: Go build
+        run: go build ./...
+      - name: Go test
+        run: go test ./...
+
+  image:
+    name: Build and push image
+    needs: test
+    # Only build/push on master and version tags, and only once the test job
+    # above has passed (needs + success() gating). Skipped on PRs and other
+    # branches.
+    if: success() && github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Generate Tags
+        id: tags
+        uses: greboid/docker-tags-action@v6.0.6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fullname: 'false'
+          separator: ' '
+      - name: Build Image
+        run: |
+          for tag in ${{ steps.tags.outputs.tags }}; do
+            buildah build -t "ghcr.io/${{ github.repository }}:$tag" -f Containerfile .
+          done
+      - name: Login to Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | buildah login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Push Images
+        run: |
+          for tag in ${{ steps.tags.outputs.tags }}; do
+            buildah push "ghcr.io/${{ github.repository }}:$tag"
+          done

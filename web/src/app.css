@@ -1,0 +1,83 @@
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#f7f7f8, #15151a);
+  --panel: light-dark(#ffffff, #1e1e25);
+  --line: light-dark(#e3e3e8, #31313a);
+  --accent: light-dark(#3b82f6, #4c8dff);
+  --accent-strong: light-dark(#2563eb, #9cc0ff);
+  --text: light-dark(#1f2937, #e6e6eb);
+  --muted: light-dark(#6b7280, #9a9aa6);
+  --danger: light-dark(#ef4444, #f87171);
+  --drop: light-dark(#eef4ff, #1c2740);
+  --accent-tint: light-dark(#cfe0ff, #2a3a5e);
+  --danger-tint: light-dark(#fee2e2, #3e2222);
+  --recur: light-dark(#7c3aed, #c4b5fd);
+  --recur-tint: light-dark(#f3e8ff, #2c2440);
+  --recur-line: light-dark(#ddd6fe, #43325f);
+  --raised: light-dark(#fbfdff, #232330);
+  --shadow: light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.45));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 14px;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+button.ghost {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+}
+
+input[type='text'],
+textarea {
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--panel);
+  color: var(--text);
+  width: 100%;
+}
+
+input[type='text']:focus,
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

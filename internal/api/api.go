@@ -1,0 +1,426 @@
+// Package api exposes an HTTP JSON API for the todo app.
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/greboid/todo/internal/db"
+	"github.com/greboid/todo/internal/models"
+	"github.com/greboid/todo/internal/schedule"
+)
+
+// Handler wires the todo HTTP routes. It holds no per-request state.
+type Handler struct {
+	store *db.DB
+}
+
+// New returns a configured Handler.
+func New(store *db.DB) *Handler { return &Handler{store: store} }
+
+// Routes returns an http.ServeMux with all API routes registered under /api.
+// Uses Go 1.22+ method+path patterns so path parameters are available via
+// r.PathValue.
+func (h *Handler) Routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/todos", h.listTodos)
+	mux.HandleFunc("POST /api/todos", h.createTodo)
+	mux.HandleFunc("GET /api/todos/{id}", h.getTodo)
+	mux.HandleFunc("PATCH /api/todos/{id}", h.updateTodo)
+	mux.HandleFunc("DELETE /api/todos/{id}", h.deleteTodo)
+	mux.HandleFunc("POST /api/todos/{id}/move", h.moveTodo)
+	mux.HandleFunc("POST /api/todos/{id}/complete", h.completeTodo)
+	mux.HandleFunc("POST /api/schedule/parse", h.parseSchedule)
+	mux.HandleFunc("GET /api/labels", h.listLabels)
+	mux.HandleFunc("POST /api/labels/predefined", h.addPredefinedLabel)
+	mux.HandleFunc("DELETE /api/labels/predefined/{name}", h.removePredefinedLabel)
+	mux.HandleFunc("GET /api/boards", h.listBoards)
+	mux.HandleFunc("POST /api/boards", h.createBoard)
+	mux.HandleFunc("GET /api/boards/{id}", h.getBoard)
+	mux.HandleFunc("PATCH /api/boards/{id}", h.updateBoard)
+	mux.HandleFunc("DELETE /api/boards/{id}", h.deleteBoard)
+	return mux
+}
+
+func (h *Handler) listTodos(w http.ResponseWriter, r *http.Request) {
+	// Optional ?boardId=N scoping. Without it, all todos across boards are
+	// returned (back-compat with older clients and with the cascade sync path).
+	boardID := int64(0)
+	if raw := r.URL.Query().Get("boardId"); raw != "" {
+		if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			boardID = id
+		}
+	}
+	todos, err := h.store.ListAll(r.Context(), boardID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, nonNil(enrichAll(todos)))
+}
+
+func (h *Handler) createTodo(w http.ResponseWriter, r *http.Request) {
+	var in models.CreateTodo
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if in.Title == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("title is required"))
+		return
+	}
+	if err := validateDueRecurrence(in.DueDate, in.Recurrence); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if in.Labels == nil {
+		in.Labels = []string{}
+	}
+	t, err := h.store.Create(r.Context(), in)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, enrich(t))
+}
+
+func (h *Handler) getTodo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	t, err := h.store.Get(r.Context(), id)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, enrich(t))
+}
+
+func (h *Handler) updateTodo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in models.UpdateTodo
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateDueRecurrence(in.DueDate, in.Recurrence); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	t, err := h.store.Update(r.Context(), id, in)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, enrich(t))
+}
+
+func (h *Handler) deleteTodo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.store.Delete(r.Context(), id); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) moveTodo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in models.MoveTodo
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	t, err := h.store.Move(r.Context(), id, in)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, enrich(t))
+}
+
+func (h *Handler) completeTodo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in models.CompleteTodo
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	t, err := h.store.SetCompleted(r.Context(), id, in.Completed)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	// Return the whole tree so the client can sync cascaded descendants.
+	all, err := h.store.ListAll(r.Context(), t.BoardID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"todo": enrich(t), "todos": nonNil(enrichAll(all))})
+}
+
+func (h *Handler) listLabels(w http.ResponseWriter, r *http.Request) {
+	labels, err := h.store.ListLabels(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, nonNil(labels))
+}
+
+func (h *Handler) addPredefinedLabel(w http.ResponseWriter, r *http.Request) {
+	var in models.CreateLabel
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if in.Name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	if err := h.store.AddPredefinedLabel(r.Context(), in.Name); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": in.Name})
+}
+
+func (h *Handler) removePredefinedLabel(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	if err := h.store.RemovePredefinedLabel(r.Context(), name); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) listBoards(w http.ResponseWriter, r *http.Request) {
+	boards, err := h.store.ListBoards(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, nonNil(boards))
+}
+
+func (h *Handler) createBoard(w http.ResponseWriter, r *http.Request) {
+	var in models.CreateBoard
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if in.Name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	b, err := h.store.CreateBoard(r.Context(), in)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, b)
+}
+
+func (h *Handler) getBoard(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	b, err := h.store.GetBoard(r.Context(), id)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
+}
+
+func (h *Handler) updateBoard(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in models.UpdateBoard
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	b, err := h.store.UpdateBoard(r.Context(), id, in)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
+}
+
+func (h *Handler) deleteBoard(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.store.DeleteBoard(r.Context(), id); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// helpers ----------------------------------------------------------------
+
+func decode(w http.ResponseWriter, r *http.Request, dst any) error {
+	defer r.Body.Close()
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return errors.New("empty request body")
+		}
+		return err
+	}
+	return nil
+}
+
+func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("invalid id"))
+		return 0, false
+	}
+	return id, true
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("encode response", "error", err)
+	}
+}
+
+type apiError struct {
+	Error string `json:"error"`
+}
+
+func writeErr(w http.ResponseWriter, status int, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(apiError{Error: err.Error()})
+}
+
+func writeStoreErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, db.ErrNotFound), errors.Is(err, db.ErrBoardNotFound):
+		writeErr(w, http.StatusNotFound, err)
+	case errors.Is(err, db.ErrNoBoard),
+		errors.Is(err, db.ErrSelfParent),
+		errors.Is(err, db.ErrCycle),
+		errors.Is(err, db.ErrInvalidInput):
+		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, db.ErrLastBoard):
+		writeErr(w, http.StatusConflict, err)
+	default:
+		writeErr(w, http.StatusInternalServerError, err)
+	}
+}
+
+// validateDueRecurrence checks the optional due date and recurrence fields
+// shared by create/update inputs. dueDate is accepted as "" (no check); a
+// non-empty value must parse as YYYY-MM-DD. A recurrence, when present, must
+// satisfy Recurrence.Valid. Both failures map to HTTP 400 via ErrInvalidInput.
+func validateDueRecurrence(due *string, rc *models.Recurrence) error {
+	if due != nil && *due != "" {
+		if _, err := time.Parse("2006-01-02", *due); err != nil {
+			return fmt.Errorf("%w: dueDate must be YYYY-MM-DD", db.ErrInvalidInput)
+		}
+	}
+	if rc != nil && !rc.Valid() {
+		return fmt.Errorf("%w: invalid recurrence", db.ErrInvalidInput)
+	}
+	return nil
+}
+
+// parseSchedule turns a free-text due/recurrence string into the structured
+// representation the rest of the API uses. The client sends its local "today"
+// (YYYY-MM-DD) so relative dates like "tomorrow" resolve from the user's
+// perspective, not the server's UTC clock. Always returns 200 with an ok flag:
+// ok=false carries an error string for live typing feedback without throwing.
+func (h *Handler) parseSchedule(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Text  string `json:"text"`
+		Today string `json:"today,omitempty"`
+	}
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	now := time.Now().UTC()
+	if in.Today != "" {
+		if t, err := time.Parse("2006-01-02", in.Today); err == nil {
+			now = t
+		}
+	}
+	type parseResponse struct {
+		OK           bool               `json:"ok"`
+		DueDate      string             `json:"dueDate"`
+		Recurrence   *models.Recurrence `json:"recurrence"`
+		ScheduleText string             `json:"scheduleText"`
+		Error        string             `json:"error,omitempty"`
+	}
+	sched, err := schedule.Parse(in.Text, now)
+	resp := parseResponse{OK: true, DueDate: sched.DueDate, Recurrence: sched.Recurrence, ScheduleText: schedule.FormatSchedule(sched.DueDate, sched.Recurrence, now)}
+	if err != nil {
+		resp = parseResponse{OK: false, Error: err.Error()}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// enrich stamps the computed scheduleText (edit-field seed) and recurrenceLabel
+// (badge) onto a todo. These are presentation fields derived from the stored
+// dueDate/recurrence, never persisted, so the schedule grammar lives only here.
+func enrich(t models.Todo) models.Todo {
+	if t.Recurrence != nil {
+		t.RecurrenceLabel = schedule.Format(*t.Recurrence)
+	}
+	t.ScheduleText = schedule.FormatSchedule(t.DueDate, t.Recurrence, time.Now().UTC())
+	return t
+}
+
+// enrichAll stamps every todo in place.
+func enrichAll(ts []models.Todo) []models.Todo {
+	for i := range ts {
+		ts[i] = enrich(ts[i])
+	}
+	return ts
+}
+
+// nonNil returns a non-nil slice so JSON serializes [] rather than null.
+// Without this, Go encodes a nil slice as the JSON token `null`, which the
+// frontend treats specially.
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
