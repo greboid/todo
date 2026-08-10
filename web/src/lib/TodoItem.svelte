@@ -28,6 +28,13 @@
   let predefinedQuery = $state('');
   let editingColorLabel = $state(null);
 
+  // Inline priority picker state.
+  let priorityPickerOpen = $state(false);
+  let activePriority = $state('');
+  let managePriorityOpen = $state(false);
+  let priorityQuery = $state('');
+  let editingColorPriority = $state(null);
+
   // Tracks where a dragged item would land if dropped here ("before", "after",
   // "into"). Used to render an insertion indicator.
   let dropZone = $state(null);
@@ -261,6 +268,52 @@
     }
   }
 
+  function openPriorityPicker() {
+    activePriority = todo.priority || '';
+    priorityPickerOpen = true;
+  }
+
+  function selectPriority(name) {
+    activePriority = activePriority === name ? '' : name;
+  }
+
+  async function savePriority() {
+    await store.update(todo.id, { priority: activePriority });
+    priorityPickerOpen = false;
+  }
+
+  async function addPriorityPredefined() {
+    const name = priorityQuery.trim();
+    if (!name) return;
+    try {
+      await store.addPredefinedPriority(name);
+      priorityQuery = '';
+    } catch (e) {
+      alert(e.message || String(e));
+    }
+  }
+
+  async function removePriorityPredefined(name) {
+    try {
+      await store.removePredefinedPriority(name);
+    } catch (e) {
+      alert(e.message || String(e));
+    }
+  }
+
+  function storedPriorityColor(name) {
+    const found = store.priorities.find((p) => p.name === name);
+    return found ? found.color : '';
+  }
+
+  async function setPriorityColor(name, color) {
+    try {
+      await store.updatePriorityColor(name, color);
+    } catch (e) {
+      alert(e.message || String(e));
+    }
+  }
+
   function onDragStart(e) {
     // A child todo's dragstart would bubble up through every ancestor .item and
     // re-fire this handler with the ancestor's `todo`, overwriting the dragged
@@ -406,6 +459,14 @@
           {/each}
         </span>
       {/if}
+      {#if todo.priority}
+        <span
+          class="badge priority"
+          style:background={labelColor(todo.priority, todo.priorityColor || '') + '22'}
+          style:border-color={labelColor(todo.priority, todo.priorityColor || '')}
+          style:color={labelColor(todo.priority, todo.priorityColor || '')}
+        ><Icon name="flag" size={12} /> {todo.priority}</span>
+      {/if}
       {#if todo.dueDate}
         {@const overdue = !todo.completed && todo.dueDate < todayISO()}
         <span class="badge due {overdue ? 'overdue' : ''}"><Icon name="calendar" size={12} /> {todo.dueDate}</span>
@@ -419,6 +480,7 @@
         </button>
         <button class="ghost" onclick={startEdit} aria-label="Edit"><Icon name="edit" size={16} /></button>
         <button class="ghost" onclick={openLabelPicker} aria-label="Labels"><Icon name="tag" size={16} /></button>
+        <button class="ghost" onclick={openPriorityPicker} aria-label="Priority"><Icon name="flag" size={16} /></button>
         <button class="ghost" onclick={() => (addingChild = !addingChild)} aria-label="Add child"><Icon name="plus" size={16} /></button>
         <button class="ghost danger" onclick={onDelete} aria-label="Delete"><Icon name="trash" size={16} /></button>
       </span>
@@ -562,6 +624,126 @@
     </div>
   {/if}
 
+  {#if priorityPickerOpen}
+    <div class="label-picker" role="dialog" aria-label="Priority">
+      {#if activePriority}
+        <div class="chips">
+          <button
+            type="button"
+            class="chip removable"
+            style:background={labelColor(activePriority, storedPriorityColor(activePriority)) + '22'}
+            style:border-color={labelColor(activePriority, storedPriorityColor(activePriority))}
+            style:color={labelColor(activePriority, storedPriorityColor(activePriority))}
+            onclick={() => (activePriority = '')}
+          >
+            {activePriority}<span class="x">×</span>
+          </button>
+        </div>
+      {/if}
+      {#if store.priorities.length}
+        <ul class="suggestions" role="listbox">
+          {#each store.priorities as p (p.name)}
+            <li>
+              <button
+                type="button"
+                class="suggestion"
+                class:selected={activePriority === p.name}
+                onclick={() => selectPriority(p.name)}
+              >
+                <span class="suggestion-dot" style:background={labelColor(p.name, p.color)}></span>
+                {p.name}
+                {#if activePriority === p.name}<span class="check">✓</span>{/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <div class="row">
+        <button type="button" class="primary" onclick={savePriority}>Save</button>
+        <button type="button" onclick={() => (priorityPickerOpen = false)}>Cancel</button>
+        <button
+          type="button"
+          class="ghost"
+          onclick={() => (managePriorityOpen = !managePriorityOpen)}
+          aria-expanded={managePriorityOpen}
+        >
+          {managePriorityOpen ? '▾' : '▸'} Manage
+        </button>
+      </div>
+      {#if managePriorityOpen}
+        <div class="predefined-manager">
+          <p class="hint">
+            Priorities are single-valued. Add or remove the predefined set shown in the picker above.
+          </p>
+          <form
+            class="label-input"
+            onsubmit={(e) => {
+              e.preventDefault();
+              addPriorityPredefined();
+            }}
+          >
+            <input
+              type="text"
+              bind:value={priorityQuery}
+              placeholder="New priority…"
+              autocomplete="off"
+            />
+            <button type="submit" class="ghost">Add</button>
+          </form>
+          {#if store.priorities.length}
+            <ul class="predefined-list">
+              {#each store.priorities as pr (pr.name)}
+                <li>
+                  <span class="predefined-label-name">
+                    <span class="color-dot" style:background={labelColor(pr.name, pr.color)}></span>
+                    {pr.name}
+                  </span>
+                  <span class="predefined-actions">
+                    <button
+                      type="button"
+                      class="ghost color-btn"
+                      style:background={labelColor(pr.name, pr.color)}
+                      onclick={() => (editingColorPriority = editingColorPriority === pr.name ? null : pr.name)}
+                      aria-label="Set colour for {pr.name}"
+                    ></button>
+                    <button
+                      type="button"
+                      class="ghost danger"
+                      onclick={() => removePriorityPredefined(pr.name)}
+                      aria-label="Remove priority {pr.name}"
+                    >
+                      ×
+                    </button>
+                  </span>
+                  {#if editingColorPriority === pr.name}
+                    <div class="color-picker">
+                      <button
+                        type="button"
+                        class="color-swatch auto"
+                        title="Auto"
+                        onclick={() => { setPriorityColor(pr.name, ''); editingColorPriority = null; }}
+                      >Auto</button>
+                      {#each LABEL_PALETTE as c (c)}
+                        <button
+                          type="button"
+                          class="color-swatch"
+                          class:selected={pr.color === c}
+                          style:background={c}
+                          onclick={() => { setPriorityColor(pr.name, c); editingColorPriority = null; }}
+                          aria-label="Set colour to {c}"
+                        ></button>
+                      {/each}
+                    </div>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   {#if addingChild}
     <NewTodo placeholder="Add a subtask…" onAdd={addChild} onCancel={() => (addingChild = false)} />
   {/if}
@@ -667,6 +849,15 @@
     background: var(--recur-tint);
     color: var(--recur);
     border-color: var(--recur-line);
+  }
+  .suggestion .check {
+    margin-left: auto;
+    font-weight: 700;
+  }
+  .suggestion {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
   .actions {
     margin-left: auto;

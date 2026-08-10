@@ -18,6 +18,8 @@ const today = "2026-08-10"
 //	overdue-urgent (label:urgent, due -5d)     id 4
 //	plain (no date, no label)                  id 5
 //	far-future (label:work, due +30d)          id 6
+//	high-priority (priority:high)              id 7
+//	low-priority (priority:low)                id 8
 func sampleBoard() []Item {
 	root := int64(1)
 	return []Item{
@@ -27,6 +29,8 @@ func sampleBoard() []Item {
 		{ID: 4, Title: "Overdue open", Labels: []string{"urgent"}, DueDate: "2026-08-05"},
 		{ID: 5, Title: "No date no label"},
 		{ID: 6, Title: "Far future", Labels: []string{"work"}, DueDate: "2026-09-09"},
+		{ID: 7, Title: "High priority task", Priority: "high"},
+		{ID: 8, Title: "Low priority task", Priority: "low"},
 	}
 }
 
@@ -54,24 +58,33 @@ func TestApply(t *testing.T) {
 	}{
 		// has: existence filters
 		{"has complete", "has:complete", []int64{1}, false},
-		{"not complete (default)", "!has:complete", []int64{1, 2, 3, 4, 5, 6}, false},
+		{"not complete (default)", "!has:complete", []int64{1, 2, 3, 4, 5, 6, 7, 8}, false},
 		{"has label", "has:label", []int64{1, 2, 4, 6}, false},
-		{"not label", "!has:label", []int64{1, 3, 5}, false},
+		{"not label", "!has:label", []int64{1, 3, 5, 7, 8}, false},
 		{"has recur", "has:recur", []int64{3}, false},
 		{"has date", "has:date", []int64{3, 4, 6}, false},
-		{"not date", "!has:date", []int64{1, 2, 5}, false},
+		{"not date", "!has:date", []int64{1, 2, 5, 7, 8}, false},
 
 		// label: positive (OR) and negation (each excludes)
 		{"label work", "label:work", []int64{1, 2, 6}, false},
-		{"not label work", "!label:work", []int64{1, 3, 4, 5}, false},
+		{"not label work", "!label:work", []int64{1, 3, 4, 5, 7, 8}, false},
+
+		// priority: positive (OR) and negation. Items without a priority are
+		// excluded by a positive priority filter.
+		{"priority high", "priority:high", []int64{7}, false},
+		{"priority low", "priority:low", []int64{8}, false},
+		{"priority OR", "priority:high priority:low", []int64{7, 8}, false},
+		{"not priority high", "!priority:high", []int64{1, 2, 3, 4, 5, 6, 8}, false},
+		{"has priority", "has:priority", []int64{7, 8}, false},
+		{"not has priority", "!has:priority", []int64{1, 2, 3, 4, 5, 6}, false},
 
 		// date presets. "week" includes no-date todos (legacy semantics).
-		{"date week", "date:week", []int64{1, 2, 3, 4, 5}, false},
+		{"date week", "date:week", []int64{1, 2, 3, 4, 5, 7, 8}, false},
 		{"not date week", "!date:week", []int64{6}, false},
 		{"date overdue", "date:overdue", []int64{4}, false},
 		{"date today", "date:today", []int64{3}, false},
 		{"date tomorrow", "date:tomorrow", nil, false},
-		{"date none", "date:none", []int64{1, 2, 5}, false},
+		{"date none", "date:none", []int64{1, 2, 5, 7, 8}, false},
 		{"date exact", "date:2026-08-05", []int64{4}, false},
 		{"date range", "date:2026-08-01..2026-08-31", []int64{3, 4}, false},
 
@@ -87,7 +100,7 @@ func TestApply(t *testing.T) {
 		{"bad has", "has:banana", nil, true},
 
 		// empty query returns everything
-		{"empty", "", []int64{1, 2, 3, 4, 5, 6}, false},
+		{"empty", "", []int64{1, 2, 3, 4, 5, 6, 7, 8}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

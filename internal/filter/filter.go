@@ -24,6 +24,7 @@ type Item struct {
 	Description   string
 	Completed     bool
 	Labels        []string
+	Priority      string // priority name, "" = none
 	DueDate       string // "YYYY-MM-DD" or "" (none)
 	HasRecurrence bool
 }
@@ -32,17 +33,20 @@ type Item struct {
 // only when it satisfies every active criterion. Its fields are unexported so
 // the grammar stays in one place; use [Parse] and [Query.Match].
 type Query struct {
-	text      string
-	labels    []string // positive label match (OR semantics)
-	notLabels []string // each excludes (AND semantics)
-	date      *dateSpec
-	dateNeg   bool
-	has       map[string]bool // keys: complete, label, recur, date
+	text          string
+	labels        []string // positive label match (OR semantics)
+	notLabels     []string // each excludes (AND semantics)
+	priorities    []string // positive priority match (OR semantics)
+	notPriorities []string // each excludes (AND semantics)
+	date          *dateSpec
+	dateNeg       bool
+	has           map[string]bool // keys: complete, label, recur, date, priority
 }
 
 // Empty reports whether the query has no criteria (matches everything).
 func (q Query) Empty() bool {
 	return q.text == "" && len(q.labels) == 0 && len(q.notLabels) == 0 &&
+		len(q.priorities) == 0 && len(q.notPriorities) == 0 &&
 		q.date == nil && len(q.has) == 0
 }
 
@@ -91,6 +95,12 @@ func Parse(input string) (Query, error) {
 				} else {
 					q.labels = append(q.labels, val)
 				}
+			case "priority", "p":
+				if neg {
+					q.notPriorities = append(q.notPriorities, val)
+				} else {
+					q.priorities = append(q.priorities, val)
+				}
 			case "date", "d":
 				d, ok := parseDate(val)
 				if !ok {
@@ -100,10 +110,10 @@ func Parse(input string) (Query, error) {
 				q.dateNeg = neg
 			case "has":
 				switch h := strings.ToLower(val); h {
-				case "complete", "label", "recur", "date":
+				case "complete", "label", "recur", "date", "priority":
 					q.has[h] = !neg
 				default:
-					return Query{}, fmt.Errorf("invalid has filter %q: use complete, label, recur, or date", val)
+					return Query{}, fmt.Errorf("invalid has filter %q: use complete, label, priority, recur, or date", val)
 				}
 			}
 			continue
@@ -195,6 +205,12 @@ func (q Query) Match(it Item, today, weekEnd string) bool {
 	if len(q.notLabels) > 0 && anyLabel(it.Labels, q.notLabels) {
 		return false
 	}
+	if len(q.priorities) > 0 && !containsString(q.priorities, it.Priority) {
+		return false
+	}
+	if len(q.notPriorities) > 0 && containsString(q.notPriorities, it.Priority) {
+		return false
+	}
 	if q.date != nil {
 		ok := testDate(it, *q.date, today, weekEnd)
 		if (q.dateNeg && ok) || (!q.dateNeg && !ok) {
@@ -205,6 +221,9 @@ func (q Query) Match(it Item, today, weekEnd string) bool {
 		return false
 	}
 	if want, ok := q.has["label"]; ok && hasAnyLabel(it) != want {
+		return false
+	}
+	if want, ok := q.has["priority"]; ok && hasPriority(it) != want {
 		return false
 	}
 	if want, ok := q.has["recur"]; ok && it.HasRecurrence != want {
@@ -230,6 +249,18 @@ func anyLabel(have, want []string) bool {
 }
 
 func hasAnyLabel(it Item) bool { return len(it.Labels) > 0 }
+
+func hasPriority(it Item) bool { return it.Priority != "" }
+
+// containsString reports whether s equals any element of list.
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
 
 // Apply evaluates q against a board's todos and returns the subset that should
 // be visible: every matching item plus the ancestors that keep the tree

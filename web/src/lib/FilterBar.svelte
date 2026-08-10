@@ -10,7 +10,7 @@
     type="text"
     class="search"
     class:invalid={store.filterError}
-    placeholder="Filter: !has:complete label:work date:week …  (or just type to search)"
+    placeholder="Filter: !has:complete label:work priority:high date:week …  (or just type to search)"
     value={store.filterText}
     oninput={(e) => store.setFilterText(e.target.value)}
   />
@@ -38,15 +38,17 @@
       <dl>
         <dt><code>label:<em>name</em></code></dt>
         <dd>has a label (OR when repeated)</dd>
+        <dt><code>priority:<em>name</em></code></dt>
+        <dd>has a priority (OR when repeated)</dd>
         <dt><code>date:<em>v</em></code></dt>
         <dd>
           due date: <code>week</code>, <code>overdue</code>, <code>none</code>, <code>today</code>,
           <code>tomorrow</code>, <code>YYYY-MM-DD</code>, or a <code>YYYY-MM-DD..YYYY-MM-DD</code> range
         </dd>
         <dt><code>has:<em>x</em></code></dt>
-        <dd>existence: <code>complete</code>, <code>label</code>, <code>recur</code>, <code>date</code></dd>
+        <dd>existence: <code>complete</code>, <code>label</code>, <code>priority</code>, <code>recur</code>, <code>date</code></dd>
         <dt><code>!<em>key</em>:<em>v</em></code></dt>
-        <dd>negate <code>label</code>, <code>date</code>, or <code>has</code></dd>
+        <dd>negate <code>label</code>, <code>priority</code>, <code>date</code>, or <code>has</code></dd>
         <dt><em>text</em></dt>
         <dd>search title + description</dd>
       </dl>

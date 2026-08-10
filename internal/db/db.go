@@ -91,6 +91,7 @@ type todo struct {
 	Completed     int     `bun:"completed,notnull"`
 	ParentID      *int64  `bun:"parent_id,nullzero"`
 	Position      int     `bun:"position,notnull"`
+	Priority      string  `bun:"priority,notnull,default:''"`
 	DueDate       *string `bun:"due_date,nullzero"`
 	Recurrence    *string `bun:"recurrence,nullzero"` // raw JSON text, as today
 }
@@ -114,6 +115,19 @@ type predefinedLabel struct {
 	Name          string `bun:"name,notnull,unique"`
 }
 
+type priority struct {
+	bun.BaseModel `bun:"table:priorities"`
+	ID            int64  `bun:"id,pk,autoincrement"`
+	Name          string `bun:"name,notnull,unique"`
+	Color         string `bun:"color,default:''"`
+}
+
+type predefinedPriority struct {
+	bun.BaseModel `bun:"table:predefined_priorities"`
+	ID            int64  `bun:"id,pk,autoincrement"`
+	Name          string `bun:"name,notnull,unique"`
+}
+
 func (b board) toModel() models.Board {
 	return models.Board{ID: b.ID, Name: b.Name, Position: b.Position}
 }
@@ -128,6 +142,7 @@ func (t todo) toModel(labels []string) models.Todo {
 		ParentID:    t.ParentID,
 		Position:    t.Position,
 		Labels:      labels,
+		Priority:    t.Priority,
 	}
 	if t.DueDate != nil {
 		m.DueDate = *t.DueDate
@@ -181,6 +196,35 @@ func (d *DB) migrate(ctx context.Context) error {
 		func(ctx context.Context) error {
 			_, err := d.db.NewCreateTable().Model((*predefinedLabel)(nil)).IfNotExists().Exec(ctx)
 			return err
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateTable().Model((*priority)(nil)).IfNotExists().Exec(ctx)
+			return err
+		},
+		// Add the color column to pre-existing priorities tables (same pattern
+		// as labels above).
+		func(ctx context.Context) error {
+			return addColumnIfMissing(ctx, d.db, "priorities", "color", "TEXT NOT NULL DEFAULT ''")
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateTable().Model((*predefinedPriority)(nil)).IfNotExists().Exec(ctx)
+			return err
+		},
+		// Add the priority column to pre-existing todos tables. On a fresh DB
+		// the CREATE TABLE above already includes it; this handles upgrades.
+		func(ctx context.Context) error {
+			return addColumnIfMissing(ctx, d.db, "todos", "priority", "TEXT NOT NULL DEFAULT ''")
+		},
+		// Seed the three default priorities (low, medium, high). Idempotent.
+		func(ctx context.Context) error {
+			defaults := []string{"low", "medium", "high"}
+			for _, name := range defaults {
+				if _, err := d.db.NewInsert().Model(&predefinedPriority{Name: name}).
+					On("CONFLICT (name) DO NOTHING").Exec(ctx); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 		func(ctx context.Context) error {
 			_, err := d.db.NewCreateIndex().IfNotExists().Index("idx_boards_position").
@@ -255,6 +299,9 @@ func (d *DB) ListAll(ctx context.Context, boardID int64) ([]models.Todo, error) 
 	if err := d.attachLabels(ctx, out); err != nil {
 		return nil, err
 	}
+	if err := d.attachPriorityColors(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -267,6 +314,7 @@ func toFilterItem(t models.Todo) filter.Item {
 		Description:   t.Description,
 		Completed:     t.Completed,
 		Labels:        t.Labels,
+		Priority:      t.Priority,
 		DueDate:       t.DueDate,
 		HasRecurrence: t.Recurrence != nil,
 	}
@@ -332,6 +380,35 @@ func (d *DB) attachLabels(ctx context.Context, ts []models.Todo) error {
 	return nil
 }
 
+// attachPriorityColors stamps the user-defined colour for each todo's priority
+// onto the PriorityColor field. Todos with no priority are left empty.
+func (d *DB) attachPriorityColors(ctx context.Context, ts []models.Todo) error {
+	names := make(map[string]struct{}, len(ts))
+	for _, t := range ts {
+		if t.Priority != "" {
+			names[t.Priority] = struct{}{}
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	colorOf := make(map[string]string, len(names))
+	for name := range names {
+		var c string
+		if err := d.db.NewSelect().ColumnExpr("color").TableExpr("priorities").
+			Where("name = ?", name).Scan(ctx, &c); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		colorOf[name] = c
+	}
+	for i := range ts {
+		if ts[i].Priority != "" {
+			ts[i].PriorityColor = colorOf[ts[i].Priority]
+		}
+	}
+	return nil
+}
+
 // labelNamesForTodo returns the sorted label names attached to a single todo.
 // Usable inside a transaction (run is a bun.IDB) for the clone-next path.
 func labelNamesForTodo(ctx context.Context, run bun.IDB, todoID int64) ([]string, error) {
@@ -375,6 +452,7 @@ func (d *DB) Create(ctx context.Context, in models.CreateTodo) (models.Todo, err
 		Description: in.Description,
 		ParentID:    in.ParentID,
 		Position:    pos,
+		Priority:    in.Priority,
 		DueDate:     in.DueDate,
 		Recurrence:  recurrenceString(in.Recurrence),
 	}
@@ -434,6 +512,9 @@ func (d *DB) Get(ctx context.Context, id int64) (models.Todo, error) {
 	}
 	wrapped := []models.Todo{t.toModel(nil)}
 	if err := d.attachLabels(ctx, wrapped); err != nil {
+		return models.Todo{}, err
+	}
+	if err := d.attachPriorityColors(ctx, wrapped); err != nil {
 		return models.Todo{}, err
 	}
 	return wrapped[0], nil
@@ -546,6 +627,7 @@ func (d *DB) spawnNextIfRecurring(ctx context.Context, id int64) error {
 		Description: src.Description,
 		ParentID:    src.ParentID,
 		Position:    count,
+		Priority:    src.Priority,
 		DueDate:     &nextDate,
 		Recurrence:  src.Recurrence,
 	}
@@ -584,6 +666,15 @@ func toNullString(p *string) any {
 		return nil
 	}
 	return *p
+}
+
+// priorityValue maps an optional priority to its bind value: nil (clear) or
+// empty string both bind "" so the NOT NULL column stays valid.
+func priorityValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
 }
 
 // recurrenceJSON marshals a recurrence rule for storage, returning nil (NULL)
@@ -652,13 +743,16 @@ func (d *DB) Update(ctx context.Context, id int64, in models.UpdateTodo) (models
 	if in.RecurrenceSet {
 		q = q.Set("recurrence = ?", recurrenceJSON(in.Recurrence)) // nil clears
 	}
+	if in.PrioritySet {
+		q = q.Set("priority = ?", priorityValue(in.Priority)) // nil clears
+	}
 	if in.Labels != nil {
 		if err := setLabelsTx(ctx, tx, id, *in.Labels); err != nil {
 			return models.Todo{}, err
 		}
 	}
 	// An UPDATE with no SET is invalid SQL; only run when a field changed.
-	if in.Title != nil || in.Description != nil || in.Completed != nil || in.DueDateSet || in.RecurrenceSet {
+	if in.Title != nil || in.Description != nil || in.Completed != nil || in.DueDateSet || in.RecurrenceSet || in.PrioritySet {
 		if _, err := q.Exec(ctx); err != nil {
 			return models.Todo{}, err
 		}
@@ -920,6 +1014,86 @@ func (d *DB) RemovePredefinedLabel(ctx context.Context, name string) error {
 		return ErrInvalidInput
 	}
 	_, err := d.db.NewDelete().Model((*predefinedLabel)(nil)).Where("name = ?", name).Exec(ctx)
+	return err
+}
+
+// ListPriorities returns all known priorities, combining predefined priorities
+// with any priorities currently in use across todos. De-duplicated and sorted.
+// Each priority carries its colour (a hex string, empty when unset).
+func (d *DB) ListPriorities(ctx context.Context) ([]models.Priority, error) {
+	var adhoc []string
+	if err := d.db.NewSelect().ColumnExpr("DISTINCT priority").TableExpr("todos").
+		Where("priority <> ''").Scan(ctx, &adhoc); err != nil {
+		return nil, err
+	}
+	var predefined []string
+	if err := d.db.NewSelect().ColumnExpr("name").TableExpr("predefined_priorities").Scan(ctx, &predefined); err != nil {
+		return nil, err
+	}
+	var colored []struct {
+		Name  string `bun:"name"`
+		Color string `bun:"color"`
+	}
+	if err := d.db.NewSelect().ColumnExpr("name, color").TableExpr("priorities").Scan(ctx, &colored); err != nil {
+		return nil, err
+	}
+	colorOf := make(map[string]string, len(colored))
+	for _, p := range colored {
+		colorOf[p.Name] = p.Color
+	}
+	seen := make(map[string]struct{}, len(adhoc)+len(predefined))
+	out := make([]models.Priority, 0, len(adhoc)+len(predefined))
+	for _, n := range adhoc {
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, models.Priority{Name: n, Color: colorOf[n]})
+	}
+	for _, n := range predefined {
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, models.Priority{Name: n, Color: colorOf[n]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// SetPriorityColor sets the user-defined colour for a priority. An empty colour
+// clears it so the priority reverts to the auto-assigned palette colour.
+func (d *DB) SetPriorityColor(ctx context.Context, name string, color string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ErrInvalidInput
+	}
+	_, err := d.db.NewInsert().Model(&priority{Name: name, Color: color}).
+		On("CONFLICT (name) DO UPDATE SET color = excluded.color").
+		Exec(ctx)
+	return err
+}
+
+// AddPredefinedPriority records a priority as predefined so it always appears in
+// the global priority list even when no todo uses it. Idempotent on name.
+func (d *DB) AddPredefinedPriority(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ErrInvalidInput
+	}
+	_, err := d.db.NewInsert().Model(&predefinedPriority{Name: name}).
+		On("CONFLICT (name) DO NOTHING").Exec(ctx)
+	return err
+}
+
+// RemovePredefinedPriority removes a priority from the predefined set. Todos
+// already using it are unaffected (they keep the priority until cleared).
+func (d *DB) RemovePredefinedPriority(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ErrInvalidInput
+	}
+	_, err := d.db.NewDelete().Model((*predefinedPriority)(nil)).Where("name = ?", name).Exec(ctx)
 	return err
 }
 
