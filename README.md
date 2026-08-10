@@ -25,35 +25,6 @@ one executable with no external dependencies and no accounts.
 - **Date-only**. Times (`at 3pm`, `every hour`) are not supported; this keeps
   the grammar simple and unambiguous.
 
-### Due date and recurrence examples
-
-The due date and recurrence rule are entered together in one text field. A
-relative date like `tomorrow` resolves from your browser's local today, not the
-server's clock.
-
-| You type | Result |
-| --- | --- |
-| `today` / `tom` / `tod` | Today's date |
-| `tomorrow` / `tmr` | Tomorrow |
-| `aug 15` / `15 aug` / `15/8` | That calendar date |
-| `next monday` | Next week's Monday (Monday-start weeks) |
-| `in 2 weeks` | Two weeks from today |
-| `end of month` | Last day of the current month |
-| `every day` | Daily recurrence |
-| `every 3 days` | Every third day |
-| `every 2 weeks on mon, wed` | Every other week on those weekdays |
-| `every weekday` / `every weekend` | Mon-Fri / Sat-Sun |
-| `every month on the 15th` | Monthly on the 15th |
-| `every last friday` | Monthly on the last Friday |
-| `every year` | Yearly |
-| `every! day` | Advance from the completion date, not the due date |
-| `every day ending dec 31` | Stop recurring after Dec 31 |
-| `every day starting sep 1` | First occurrence Sep 1 |
-
-A blank field clears both the due date and the recurrence.
-
-## Getting started
-
 ### Prerequisites
 
 - [Go](https://go.dev/) 1.26 or newer
