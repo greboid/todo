@@ -1,5 +1,5 @@
 <script>
-  import { store } from './store.svelte.js';
+  import { store, labelColor, LABEL_PALETTE } from './store.svelte.js';
   import NewTodo from './NewTodo.svelte';
   import Icon from './Icon.svelte';
   import Self from './TodoItem.svelte';
@@ -26,6 +26,7 @@
   let activeLabels = $state([]);
   let managePredefinedOpen = $state(false);
   let predefinedQuery = $state('');
+  let editingColorLabel = $state(null);
 
   // Tracks where a dragged item would land if dropped here ("before", "after",
   // "into"). Used to render an insertion indicator.
@@ -60,7 +61,7 @@
   // Existing labels that match the current typeahead query and aren't applied.
   const labelSuggestions = $derived(
     store.labels
-      .filter((l) => !activeLabels.includes(l) && l.toLowerCase().includes(labelQuery.toLowerCase()))
+      .filter((l) => !activeLabels.includes(l.name) && l.name.toLowerCase().includes(labelQuery.toLowerCase()))
       .slice(0, 8),
   );
 
@@ -247,6 +248,19 @@
     }
   }
 
+  function storedColor(name) {
+    const found = store.labels.find((l) => l.name === name);
+    return found ? found.color : '';
+  }
+
+  async function setLabelColor(name, color) {
+    try {
+      await store.updateLabelColor(name, color);
+    } catch (e) {
+      alert(e.message || String(e));
+    }
+  }
+
   function onDragStart(e) {
     // A child todo's dragstart would bubble up through every ancestor .item and
     // re-fire this handler with the ancestor's `todo`, overwriting the dragged
@@ -382,7 +396,14 @@
       >{todo.title}</span>
       {#if todo.labels?.length}
         <span class="labels">
-          {#each todo.labels as label}<span class="label">{label}</span>{/each}
+          {#each todo.labels as label (label)}
+            <span
+              class="label"
+              style:background={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '') + '22'}
+              style:border-color={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '')}
+              style:color={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '')}
+            >{label}</span>
+          {/each}
         </span>
       {/if}
       {#if todo.dueDate}
@@ -411,7 +432,14 @@
     <div class="label-picker" role="dialog" aria-label="Labels">
       <div class="chips">
         {#each activeLabels as label (label)}
-          <button type="button" class="chip removable" onclick={() => toggleExisting(label)}>
+          <button
+            type="button"
+            class="chip removable"
+            style:background={labelColor(label, storedColor(label)) + '22'}
+            style:border-color={labelColor(label, storedColor(label))}
+            style:color={labelColor(label, storedColor(label))}
+            onclick={() => toggleExisting(label)}
+          >
             {label}<span class="x">×</span>
           </button>
         {/each}
@@ -434,10 +462,15 @@
       </form>
       {#if labelSuggestions.length}
         <ul class="suggestions" role="listbox">
-          {#each labelSuggestions as suggestion (suggestion)}
+          {#each labelSuggestions as suggestion (suggestion.name)}
             <li>
-              <button type="button" class="suggestion" onclick={() => toggleExisting(suggestion)}>
-                + {suggestion}
+              <button
+                type="button"
+                class="suggestion"
+                onclick={() => toggleExisting(suggestion.name)}
+              >
+                <span class="suggestion-dot" style:background={labelColor(suggestion.name, suggestion.color)}></span>
+                {suggestion.name}
               </button>
             </li>
           {/each}
@@ -477,17 +510,49 @@
           </form>
           {#if store.labels.length}
             <ul class="predefined-list">
-              {#each store.labels as label (label)}
+              {#each store.labels as lbl (lbl.name)}
                 <li>
-                  <span class="label">{label}</span>
-                  <button
-                    type="button"
-                    class="ghost danger"
-                    onclick={() => removePredefined(label)}
-                    aria-label="Remove predefined label {label}"
-                  >
-                    ×
-                  </button>
+                  <span class="predefined-label-name">
+                    <span class="color-dot" style:background={labelColor(lbl.name, lbl.color)}></span>
+                    {lbl.name}
+                  </span>
+                  <span class="predefined-actions">
+                    <button
+                      type="button"
+                      class="ghost color-btn"
+                      style:background={labelColor(lbl.name, lbl.color)}
+                      onclick={() => (editingColorLabel = editingColorLabel === lbl.name ? null : lbl.name)}
+                      aria-label="Set colour for {lbl.name}"
+                    ></button>
+                    <button
+                      type="button"
+                      class="ghost danger"
+                      onclick={() => removePredefined(lbl.name)}
+                      aria-label="Remove predefined label {lbl.name}"
+                    >
+                      ×
+                    </button>
+                  </span>
+                  {#if editingColorLabel === lbl.name}
+                    <div class="color-picker">
+                      <button
+                        type="button"
+                        class="color-swatch auto"
+                        title="Auto"
+                        onclick={() => { setLabelColor(lbl.name, ''); editingColorLabel = null; }}
+                      >Auto</button>
+                      {#each LABEL_PALETTE as c (c)}
+                        <button
+                          type="button"
+                          class="color-swatch"
+                          class:selected={lbl.color === c}
+                          style:background={c}
+                          onclick={() => { setLabelColor(lbl.name, c); editingColorLabel = null; }}
+                          aria-label="Set colour to {c}"
+                        ></button>
+                      {/each}
+                    </div>
+                  {/if}
                 </li>
               {/each}
             </ul>
@@ -738,8 +803,79 @@
     justify-content: space-between;
     padding: 2px 6px;
     gap: 6px;
+    flex-wrap: wrap;
   }
   .predefined-list li + li {
     border-top: 1px solid var(--line);
+  }
+  .predefined-label-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .predefined-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .color-btn {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid var(--line);
+    cursor: pointer;
+  }
+  .color-btn:hover {
+    border-color: var(--text);
+  }
+  .suggestion-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  .color-picker {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding: 4px 6px;
+    width: 100%;
+    border-top: 1px dashed var(--line);
+  }
+  .color-swatch {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+  }
+  .color-swatch.selected {
+    border-color: var(--text);
+  }
+  .color-swatch.auto {
+    width: auto;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    font-size: 10px;
+    border-radius: 999px;
+  }
+  .suggestion {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
   }
 </style>

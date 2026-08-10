@@ -245,7 +245,8 @@ paths:
       summary: List labels
       description: >
         The merged, de-duplicated, sorted set of predefined labels and labels
-        currently in use across todos.
+        currently in use across todos. Each label carries its colour (a hex
+        string, empty when no user-defined colour is set).
       responses:
         "200":
           description: Label list.
@@ -253,7 +254,32 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { type: string }
+                items: { $ref: "#/components/schemas/Label" }
+
+  /api/labels/{name}:
+    parameters:
+      - $ref: "#/components/parameters/LabelNamePath"
+    put:
+      tags: [Labels]
+      operationId: updateLabel
+      summary: Set a label's colour
+      description: >
+        Sets the user-defined colour for a label. Colour is a hex string
+        (e.g. "#ef4444"). An empty string clears the colour so the label
+        reverts to its auto-assigned palette colour. The label is created
+        if it does not yet exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateLabel" }
+      responses:
+        "200":
+          description: Updated label.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "400": { $ref: "#/components/responses/BadRequest" }
 
   /api/labels/predefined:
     post:
@@ -448,6 +474,15 @@ components:
         labels:
           type: array
           items: { type: string }
+        labelColors:
+          type: array
+          description: Per-label colour (parallel to labels; hex string, empty = auto).
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string }
+              color: { type: string, description: "Hex colour; empty means auto-assigned." }
         dueDate:
           type: string
           description: "YYYY-MM-DD; empty/absent means none."
@@ -571,6 +606,23 @@ components:
       required: [name]
       properties:
         name: { type: string }
+
+    Label:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        color:
+          type: string
+          description: "Hex colour (e.g. #ef4444); empty means auto-assigned palette colour."
+
+    UpdateLabel:
+      type: object
+      properties:
+        color:
+          type: string
+          nullable: true
+          description: "Hex colour (e.g. #ef4444); null or empty clears the user-defined colour."
 
     LabelName:
       type: object
