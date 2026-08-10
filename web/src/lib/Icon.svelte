@@ -56,6 +56,9 @@
     <line x1="6" y1="6" x2="18" y2="18" />
   {:else if name === 'chevron'}
     <polyline points="9 18 15 12 9 6" />
+  {:else if name === 'flag'}
+    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+    <line x1="4" y1="22" x2="4" y2="15" />
   {/if}
 </svg>
 

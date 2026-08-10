@@ -101,6 +101,10 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("PUT /api/labels/{name}", h.updateLabel)
 	mux.HandleFunc("POST /api/labels/predefined", h.addPredefinedLabel)
 	mux.HandleFunc("DELETE /api/labels/predefined/{name}", h.removePredefinedLabel)
+	mux.HandleFunc("GET /api/priorities", h.listPriorities)
+	mux.HandleFunc("PUT /api/priorities/{name}", h.updatePriority)
+	mux.HandleFunc("POST /api/priorities/predefined", h.addPredefinedPriority)
+	mux.HandleFunc("DELETE /api/priorities/predefined/{name}", h.removePredefinedPriority)
 	mux.HandleFunc("GET /api/boards", h.listBoards)
 	mux.HandleFunc("POST /api/boards", h.createBoard)
 	mux.HandleFunc("GET /api/boards/{id}", h.getBoard)
@@ -170,6 +174,7 @@ func (h *Handler) createTodo(w http.ResponseWriter, r *http.Request) {
 	if in.Labels == nil {
 		in.Labels = []string{}
 	}
+	in.Priority = strings.TrimSpace(in.Priority)
 	t, err := h.store.Create(r.Context(), in)
 	if err != nil {
 		writeStoreErr(w, err)
@@ -328,6 +333,71 @@ func (h *Handler) removePredefinedLabel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := h.store.RemovePredefinedLabel(r.Context(), name); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) listPriorities(w http.ResponseWriter, r *http.Request) {
+	priorities, err := h.store.ListPriorities(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, nonNil(priorities))
+}
+
+func (h *Handler) updatePriority(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	var in models.UpdatePriority
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	color := ""
+	if in.Color != nil {
+		color = strings.TrimSpace(*in.Color)
+		if color != "" && !hexColorRe.MatchString(color) {
+			writeErr(w, http.StatusBadRequest, errors.New("color must be a hex string like #ef4444"))
+			return
+		}
+	}
+	if err := h.store.SetPriorityColor(r.Context(), name, color); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, models.Priority{Name: name, Color: color})
+}
+
+func (h *Handler) addPredefinedPriority(w http.ResponseWriter, r *http.Request) {
+	var in models.CreatePriority
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if in.Name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	if err := h.store.AddPredefinedPriority(r.Context(), in.Name); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": in.Name})
+}
+
+func (h *Handler) removePredefinedPriority(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	if err := h.store.RemovePredefinedPriority(r.Context(), name); err != nil {
 		writeStoreErr(w, err)
 		return
 	}

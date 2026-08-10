@@ -62,6 +62,7 @@ function createStore() {
   let loading = $state(false);
   let error = $state(null);
   let labels = $state([]);
+  let priorities = $state([]);
   let boards = $state([]);
   // Active board is the one currently shown. Persisted across reloads; falls
   // back to the first board if the stored id no longer exists. May also be set
@@ -220,12 +221,14 @@ function createStore() {
         activeBoardId = boardList[0]?.id ?? null;
         if (activeBoardId) storage.set('todo:activeBoard', String(activeBoardId));
       }
-      const [todoList, labelList] = await Promise.all([
+      const [todoList, labelList, priorityList] = await Promise.all([
         api.listTodos(activeBoardId ?? undefined, filterText, todayISO()),
         api.listLabels(),
+        api.listPriorities(),
       ]);
       todos = todoList ?? [];
       labels = labelList ?? [];
+      priorities = priorityList ?? [];
       filterError = '';
       syncURL();
     } catch (e) {
@@ -286,13 +289,14 @@ function createStore() {
     }
   }
 
-  async function create({ title, description = '', parentId = null, labels = [], dueDate = null, recurrence = null }) {
+  async function create({ title, description = '', parentId = null, labels = [], priority = '', dueDate = null, recurrence = null }) {
     const payload = {
       title,
       description,
       parentId: parentId ?? undefined,
       labels,
     };
+    if (priority) payload.priority = priority;
     if (parentId == null) {
       payload.boardId = activeBoardId ?? undefined;
     }
@@ -310,7 +314,10 @@ function createStore() {
     if (patch.labels) {
       await loadLabels();
     }
-    // A field change (labels, due date, title) can alter filter membership.
+    if (patch.priority !== undefined) {
+      await loadPriorities();
+    }
+    // A field change (labels, priority, due date, title) can alter filter membership.
     await load();
     return updated;
   }
@@ -375,6 +382,28 @@ function createStore() {
     await load();
   }
 
+  async function loadPriorities() {
+    priorities = (await api.listPriorities()) ?? [];
+  }
+
+  async function addPredefinedPriority(name) {
+    const trimmed = (name ?? '').trim();
+    if (!trimmed) return;
+    await api.addPredefinedPriority(trimmed);
+    await loadPriorities();
+  }
+
+  async function removePredefinedPriority(name) {
+    await api.removePredefinedPriority(name);
+    await loadPriorities();
+  }
+
+  async function updatePriorityColor(name, color) {
+    await api.updatePriority(name, color);
+    await loadPriorities();
+    await load();
+  }
+
   return {
     get todos() {
       return todos;
@@ -387,6 +416,9 @@ function createStore() {
     },
     get labels() {
       return labels;
+    },
+    get priorities() {
+      return priorities;
     },
     get boards() {
       return boards;
@@ -458,5 +490,9 @@ function createStore() {
     addPredefinedLabel,
     removePredefinedLabel,
     updateLabelColor,
+    loadPriorities,
+    addPredefinedPriority,
+    removePredefinedPriority,
+    updatePriorityColor,
   };
 }

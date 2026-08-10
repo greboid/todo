@@ -53,6 +53,26 @@ type UpdateLabel struct {
 	Color *string `json:"color"`
 }
 
+// Priority is a priority level with its colour. Colour is a hex string (e.g.
+// "#ef4444") or empty when no user-defined colour is set (the client picks
+// from a palette deterministically by name). Unlike labels, a todo carries at
+// most one priority.
+type Priority struct {
+	Name  string `json:"name"`
+	Color string `json:"color,omitempty"`
+}
+
+// CreatePriority is the payload for adding a priority to the predefined set.
+type CreatePriority struct {
+	Name string `json:"name"`
+}
+
+// UpdatePriority is the payload for changing a priority's colour. Colour is a
+// hex string; an empty string clears the user-defined colour.
+type UpdatePriority struct {
+	Color *string `json:"color"`
+}
+
 // CompleteTodo is the payload for the /complete endpoint.
 type CompleteTodo struct {
 	Completed bool `json:"completed"`
@@ -139,6 +159,8 @@ type Todo struct {
 	Position        int          `json:"position"`
 	Labels          []string     `json:"labels,omitempty"`
 	LabelColors     []LabelColor `json:"labelColors,omitempty"`
+	Priority        string       `json:"priority,omitempty"`        // priority name, "" = none
+	PriorityColor   string       `json:"priorityColor,omitempty"`   // hex colour for the priority, "" = auto
 	DueDate         string       `json:"dueDate,omitempty"`         // "YYYY-MM-DD", "" = none
 	Recurrence      *Recurrence  `json:"recurrence,omitempty"`      // nil = non-recurring
 	ScheduleText    string       `json:"scheduleText,omitempty"`    // canonical free-text seed for the edit field (computed, not stored)
@@ -153,6 +175,7 @@ type CreateTodo struct {
 	ParentID    *int64      `json:"parentId,omitempty"`
 	Position    *int        `json:"position,omitempty"`
 	Labels      []string    `json:"labels,omitempty"`
+	Priority    string      `json:"priority,omitempty"`
 	DueDate     *string     `json:"dueDate,omitempty"`
 	Recurrence  *Recurrence `json:"recurrence,omitempty"`
 }
@@ -202,6 +225,8 @@ type UpdateTodo struct {
 	OptionalParent
 	Position      *int        `json:"position,omitempty"`
 	Labels        *[]string   `json:"labels,omitempty"`
+	Priority      *string     `json:"-"` // value to set; nil+PrioritySet = clear
+	PrioritySet   bool        `json:"-"`
 	DueDate       *string     `json:"-"` // value to set; nil+DueDateSet = clear
 	DueDateSet    bool        `json:"-"`
 	Recurrence    *Recurrence `json:"-"` // value to set; nil+RecurrenceSet = clear
@@ -251,6 +276,16 @@ func (u *UpdateTodo) UnmarshalJSON(b []byte) error {
 			return err
 		}
 		u.Labels = &l
+	}
+	if v, ok := raw["priority"]; ok {
+		u.PrioritySet = true
+		if string(v) != "null" {
+			var s string
+			if err := json.Unmarshal(v, &s); err != nil {
+				return err
+			}
+			u.Priority = &s
+		}
 	}
 	if v, ok := raw["dueDate"]; ok {
 		u.DueDateSet = true

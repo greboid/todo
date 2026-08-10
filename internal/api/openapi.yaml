@@ -23,6 +23,8 @@ tags:
     description: Top-level groupings of todos. At least one board must exist.
   - name: Labels
     description: Predefined label set plus labels currently in use.
+  - name: Priorities
+    description: Predefined priority set plus priorities currently in use. A todo carries at most one priority.
   - name: Schedule
     description: Free-text due-date/recurrence parsing.
 
@@ -311,6 +313,79 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/priorities:
+    get:
+      tags: [Priorities]
+      operationId: listPriorities
+      summary: List priorities
+      description: >
+        The merged, de-duplicated, sorted set of predefined priorities and
+        priorities currently in use across todos. Each priority carries its
+        colour (a hex string, empty when no user-defined colour is set).
+      responses:
+        "200":
+          description: Priority list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Priority" }
+
+  /api/priorities/{name}:
+    parameters:
+      - $ref: "#/components/parameters/LabelNamePath"
+    put:
+      tags: [Priorities]
+      operationId: updatePriority
+      summary: Set a priority's colour
+      description: >
+        Sets the user-defined colour for a priority. Colour is a hex string
+        (e.g. "#ef4444"). An empty string clears the colour so the priority
+        reverts to its auto-assigned palette colour. The priority is created
+        if it does not yet exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePriority" }
+      responses:
+        "200":
+          description: Updated priority.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Priority" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/priorities/predefined:
+    post:
+      tags: [Priorities]
+      operationId: addPredefinedPriority
+      summary: Add a predefined priority
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePriority" }
+      responses:
+        "201":
+          description: Added priority.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PriorityName" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/priorities/predefined/{name}:
+    parameters:
+      - $ref: "#/components/parameters/LabelNamePath"
+    delete:
+      tags: [Priorities]
+      operationId: removePredefinedPriority
+      summary: Remove a predefined priority
+      responses:
+        "204": { description: Removed. No content. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/schedule/parse:
     post:
       tags: [Schedule]
@@ -383,10 +458,11 @@ components:
       in: query
       required: false
       description: >
-        Server-side filter query. Qualifiers: `label:<name>`, `date:<value>`,
-        `has:<complete|label|recur|date>`, and bare search text. Prepend `!` to
-        label/date/has for negation. Date values: week, overdue, none, today,
-        tomorrow, YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD. Invalid values yield 400.
+        Server-side filter query. Qualifiers: `label:<name>`, `priority:<name>`,
+        `date:<value>`, `has:<complete|label|priority|recur|date>`, and bare
+        search text. Prepend `!` to label/priority/date/has for negation. Date
+        values: week, overdue, none, today, tomorrow, YYYY-MM-DD, or
+        YYYY-MM-DD..YYYY-MM-DD. Invalid values yield 400.
       schema: { type: string, example: "!has:complete label:work" }
     TodayQuery:
       name: today
@@ -483,6 +559,12 @@ components:
             properties:
               name: { type: string }
               color: { type: string, description: "Hex colour; empty means auto-assigned." }
+        priority:
+          type: string
+          description: "Priority name; empty/absent means none."
+        priorityColor:
+          type: string
+          description: "Hex colour for the priority; empty means auto-assigned."
         dueDate:
           type: string
           description: "YYYY-MM-DD; empty/absent means none."
@@ -520,6 +602,9 @@ components:
         labels:
           type: array
           items: { type: string }
+        priority:
+          type: string
+          description: "Priority name; empty/absent means none."
         dueDate:
           type: string
           description: "YYYY-MM-DD."
@@ -529,9 +614,10 @@ components:
     UpdateTodo:
       type: object
       description: >
-        Partial update; omitted fields are left unchanged. Three fields carry a
+        Partial update; omitted fields are left unchanged. Four fields carry a
         three-way distinction:
           * `parentId` — absent: unchanged; null: move to root; <number>: nest under parent.
+          * `priority` — absent: unchanged; null/empty: clear; <string>: set.
           * `dueDate` — absent: unchanged; null: clear; "YYYY-MM-DD": set.
           * `recurrence` — absent: unchanged; null: clear; object: set.
       properties:
@@ -556,6 +642,10 @@ components:
           type: array
           items: { type: string }
           nullable: true
+        priority:
+          type: string
+          nullable: true
+          description: "Absent = unchanged; null/empty = clear; <string> = set."
         dueDate:
           type: string
           nullable: true
@@ -625,6 +715,35 @@ components:
           description: "Hex colour (e.g. #ef4444); null or empty clears the user-defined colour."
 
     LabelName:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    Priority:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        color:
+          type: string
+          description: "Hex colour (e.g. #ef4444); empty means auto-assigned palette colour."
+
+    CreatePriority:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    UpdatePriority:
+      type: object
+      properties:
+        color:
+          type: string
+          nullable: true
+          description: "Hex colour (e.g. #ef4444); null or empty clears the user-defined colour."
+
+    PriorityName:
       type: object
       required: [name]
       properties:
