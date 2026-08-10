@@ -1,0 +1,619 @@
+openapi: 3.0.3
+info:
+  title: Todo API
+  version: 1.0.0
+  description: |
+    JSON API for a single-binary todo app: todos grouped into boards, with
+    subtasks (parent/child), labels, ordering, Todoist-style due dates and
+    recurrence, and free-text schedule parsing.
+
+    The same binary also serves a Svelte SPA for everything under `/`; this
+    document describes only the `/api` surface.
+
+    All responses use JSON. Error bodies have the shape `{"error": "<message>"}`.
+    List endpoints never return `null` for an array — an empty collection is
+    serialized as `[]`. Request bodies are capped at 1 MiB.
+servers:
+  - url: /
+    description: Relative to the server host (default listen address :8080).
+tags:
+  - name: Todos
+    description: Create, read, update, delete, move, and complete todos.
+  - name: Boards
+    description: Top-level groupings of todos. At least one board must exist.
+  - name: Labels
+    description: Predefined label set plus labels currently in use.
+  - name: Schedule
+    description: Free-text due-date/recurrence parsing.
+
+paths:
+  /api/todos:
+    get:
+      tags: [Todos]
+      operationId: listTodos
+      summary: List todos
+      description: >
+        Returns todos. Without `boardId`, every todo across all boards is
+        returned. Provide `boardId` to scope to a single board.
+      parameters:
+        - $ref: "#/components/parameters/BoardIdQuery"
+      responses:
+        "200":
+          description: Todo list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Todo" }
+    post:
+      tags: [Todos]
+      operationId: createTodo
+      summary: Create a todo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTodo" }
+      responses:
+        "201":
+          description: Created todo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Todo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/todos/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Todos]
+      operationId: getTodo
+      summary: Get a todo
+      responses:
+        "200":
+          description: The todo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Todo" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Todos]
+      operationId: updateTodo
+      summary: Update a todo (partial)
+      description: >
+        Partial update. Omitted fields are left unchanged. The `parentId`,
+        `dueDate`, and `recurrence` fields each support a three-way
+        distinction — see the request schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTodo" }
+      responses:
+        "200":
+          description: Updated todo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Todo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Todos]
+      operationId: deleteTodo
+      summary: Delete a todo
+      responses:
+        "204": { description: Deleted. No content. }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/todos/{id}/move:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Todos]
+      operationId: moveTodo
+      summary: Move a todo (reparent and/or reorder)
+      description: >
+        Reparent and/or reposition a todo within its sibling group. Moving under
+        a parent on another board re-scopes the todo to that parent's board.
+        Self-parenting and cycles are rejected (400).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MoveTodo" }
+      responses:
+        "200":
+          description: Moved todo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Todo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/todos/{id}/complete:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Todos]
+      operationId: completeTodo
+      summary: Mark a todo complete or incomplete
+      description: >
+        Completing cascades to all descendants and, for a recurring todo,
+        spawns a new incomplete instance with the due date advanced (the
+        completed original stays in place). The whole board tree is returned
+        so the client can re-sync cascaded state. Un-completing does not spawn.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompleteTodo" }
+      responses:
+        "200":
+          description: The toggled todo plus the full board tree.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompleteResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/boards:
+    get:
+      tags: [Boards]
+      operationId: listBoards
+      summary: List boards
+      responses:
+        "200":
+          description: Board list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Board" }
+    post:
+      tags: [Boards]
+      operationId: createBoard
+      summary: Create a board
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateBoard" }
+      responses:
+        "201":
+          description: Created board.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Board" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/boards/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Boards]
+      operationId: getBoard
+      summary: Get a board
+      responses:
+        "200":
+          description: The board.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Board" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Boards]
+      operationId: updateBoard
+      summary: Rename or reorder a board (partial)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateBoard" }
+      responses:
+        "200":
+          description: Updated board.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Board" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Boards]
+      operationId: deleteBoard
+      summary: Delete a board
+      description: >
+        Deleting the last remaining board is rejected (409). The app requires
+        at least one board to exist.
+      responses:
+        "204": { description: Deleted. No content. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/labels:
+    get:
+      tags: [Labels]
+      operationId: listLabels
+      summary: List labels
+      description: >
+        The merged, de-duplicated, sorted set of predefined labels and labels
+        currently in use across todos.
+      responses:
+        "200":
+          description: Label list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+
+  /api/labels/predefined:
+    post:
+      tags: [Labels]
+      operationId: addPredefinedLabel
+      summary: Add a predefined label
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateLabel" }
+      responses:
+        "201":
+          description: Added label.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LabelName" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/labels/predefined/{name}:
+    parameters:
+      - $ref: "#/components/parameters/LabelNamePath"
+    delete:
+      tags: [Labels]
+      operationId: removePredefinedLabel
+      summary: Remove a predefined label
+      responses:
+        "204": { description: Removed. No content. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/schedule/parse:
+    post:
+      tags: [Schedule]
+      operationId: parseSchedule
+      summary: Parse free-text due date / recurrence
+      description: >
+        Turns a single free-text string (e.g. `tomorrow`, `aug 15`,
+        `every 2 weeks on mon, wed`, `every month on the 15th starting sep 1
+        ending dec 31`) into a structured due date and recurrence. Send the
+        client's local `today` (YYYY-MM-DD) so relative dates resolve from the
+        user's perspective. Times are out of scope (date-only) and parse to an
+        error. Always returns 200: `ok=false` carries an `error` string for live
+        typing feedback.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleParseRequest" }
+      responses:
+        "200":
+          description: Parse result (success or failure).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleParseResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+components:
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      description: Resource identifier (path parameter).
+      schema: { type: integer, format: int64 }
+    BoardIdQuery:
+      name: boardId
+      in: query
+      required: false
+      description: Scope to a single board. Omit to return todos across all boards.
+      schema: { type: integer, format: int64 }
+    LabelNamePath:
+      name: name
+      in: path
+      required: true
+      description: Label name (URL-decoded path segment).
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Invalid input (malformed body, invalid id, bad recurrence, etc.).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Conflict (e.g. deleting the last board).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Board:
+      type: object
+      required: [id, name, position]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        position: { type: integer, description: 0-based index within boards. }
+
+    CreateBoard:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        position:
+          type: integer
+          nullable: true
+          description: Omit to append at the end.
+
+    UpdateBoard:
+      type: object
+      description: Partial update; omitted fields are unchanged.
+      properties:
+        name:
+          type: string
+          nullable: true
+        position:
+          type: integer
+          nullable: true
+
+    Todo:
+      type: object
+      required: [id, boardId, title, description, completed, position]
+      properties:
+        id: { type: integer, format: int64 }
+        boardId: { type: integer, format: int64 }
+        title: { type: string }
+        description: { type: string }
+        completed: { type: boolean }
+        parentId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Parent todo id; null/absent means a root todo.
+        position:
+          type: integer
+          description: 0-based index within its sibling group, scoped to the board.
+        labels:
+          type: array
+          items: { type: string }
+        dueDate:
+          type: string
+          description: "YYYY-MM-DD; empty/absent means none."
+        recurrence:
+          allOf:
+            - $ref: "#/components/schemas/Recurrence"
+          description: Recurrence rule; absent means non-recurring.
+        scheduleText:
+          type: string
+          description: Canonical free-text seed for the edit field (computed, not stored).
+        recurrenceLabel:
+          type: string
+          description: Short badge label, e.g. "2 weeks on Mon, Wed" (computed, not stored).
+
+    CreateTodo:
+      type: object
+      required: [title]
+      properties:
+        boardId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Target board. If omitted, the current/default board is used.
+        title: { type: string }
+        description: { type: string }
+        parentId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Parent todo to nest under; null/absent creates a root todo.
+        position:
+          type: integer
+          nullable: true
+          description: 0-based index within the sibling group; omit to append.
+        labels:
+          type: array
+          items: { type: string }
+        dueDate:
+          type: string
+          description: "YYYY-MM-DD."
+        recurrence:
+          $ref: "#/components/schemas/Recurrence"
+
+    UpdateTodo:
+      type: object
+      description: >
+        Partial update; omitted fields are left unchanged. Three fields carry a
+        three-way distinction:
+          * `parentId` — absent: unchanged; null: move to root; <number>: nest under parent.
+          * `dueDate` — absent: unchanged; null: clear; "YYYY-MM-DD": set.
+          * `recurrence` — absent: unchanged; null: clear; object: set.
+      properties:
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        completed:
+          type: boolean
+          nullable: true
+        parentId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Tri-state: absent = unchanged; null = move to root; <n> = nest under parent n."
+        position:
+          type: integer
+          nullable: true
+        labels:
+          type: array
+          items: { type: string }
+          nullable: true
+        dueDate:
+          type: string
+          nullable: true
+          description: "Absent = unchanged; null = clear; \"YYYY-MM-DD\" = set."
+        recurrence:
+          allOf:
+            - $ref: "#/components/schemas/Recurrence"
+          nullable: true
+          description: Absent = unchanged; null = clear; object = set.
+
+    MoveTodo:
+      type: object
+      description: >
+        Reparent and/or reorder. `parentId` uses the same tri-state as UpdateTodo
+        (absent = unchanged, null = root, <number> = nest under parent).
+      properties:
+        parentId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Tri-state: absent = unchanged; null = move to root; <n> = nest under parent n."
+        position:
+          type: integer
+          nullable: true
+          description: 0-based index within the (new) sibling group; omit to append.
+
+    CompleteTodo:
+      type: object
+      required: [completed]
+      properties:
+        completed:
+          type: boolean
+          description: "true marks complete (cascades to descendants and spawns the next recurring instance); false marks incomplete."
+
+    CompleteResponse:
+      type: object
+      required: [todo, todos]
+      properties:
+        todo:
+          $ref: "#/components/schemas/Todo"
+        todos:
+          type: array
+          items: { $ref: "#/components/schemas/Todo" }
+          description: The full board tree, so the client can re-sync cascaded state.
+
+    CreateLabel:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    LabelName:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    Recurrence:
+      type: object
+      required: [frequency, interval]
+      description: |
+        Todoist-style repeating schedule. Fields depend on the frequency:
+          * daily   — interval only.
+          * weekly  — interval; weekdays restricts to specific weekdays.
+          * monthly — interval plus one of monthDays, lastDay, or nthWeekday
+            (with none set, the base day-of-month is kept).
+          * yearly  — interval only.
+      properties:
+        frequency:
+          type: string
+          enum: [daily, weekly, monthly, yearly]
+        interval:
+          type: integer
+          minimum: 1
+          description: Repeat every N periods.
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 6
+          description: "weekly: target weekdays, 0=Sun..6=Sat."
+        monthDays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 31
+          description: "monthly: target days-of-month (e.g. [2, 15, 27])."
+        lastDay:
+          type: boolean
+          description: monthly — target the last day of the month.
+        nthWeekday:
+          allOf:
+            - $ref: "#/components/schemas/NthWeekday"
+          description: monthly — ordinal weekday of the month.
+        endDate:
+          type: string
+          description: "YYYY-MM-DD; recurrence stops after this date."
+        fromCompletion:
+          type: boolean
+          description: "Todoist's every!: advance from the completion date, not the due date."
+
+    NthWeekday:
+      type: object
+      required: [n, weekday]
+      description: Ordinal weekday of the month, e.g. the 2nd Tuesday (n=2, weekday=2) or the last Friday (n=-1, weekday=5).
+      properties:
+        n:
+          type: integer
+          description: "1..5, or -1 for the last such weekday."
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: "0=Sun..6=Sat."
+
+    ScheduleParseRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: Free-text due date / recurrence.
+        today:
+          type: string
+          description: "Client's local today as YYYY-MM-DD, so relative terms like \"tomorrow\" resolve from the user's perspective."
+
+    ScheduleParseResponse:
+      type: object
+      required: [ok, dueDate, scheduleText]
+      properties:
+        ok:
+          type: boolean
+          description: Whether parsing succeeded.
+        dueDate:
+          type: string
+          description: "YYYY-MM-DD; empty when no due date or on parse failure."
+        recurrence:
+          allOf:
+            - $ref: "#/components/schemas/Recurrence"
+          description: Parsed recurrence; absent means non-recurring.
+        scheduleText:
+          type: string
+          description: Canonical free-text rendering of the parsed schedule.
+        error:
+          type: string
+          description: Present when ok is false.

@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vite build && pnpm run copy:swagger",
+    "copy:swagger": "mkdir -p ../internal/api/swagger-ui && cp node_modules/swagger-ui-dist/swagger-ui-bundle.js node_modules/swagger-ui-dist/swagger-ui.css node_modules/swagger-ui-dist/LICENSE node_modules/swagger-ui-dist/NOTICE ../internal/api/swagger-ui/",
     "preview": "vite preview"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "svelte": "^5.56.8",
+    "swagger-ui-dist": "^5.32.12",
     "vite": "^8.2.1"
   }
 }

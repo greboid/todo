@@ -2,19 +2,76 @@
 package api
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/greboid/todo/internal/db"
 	"github.com/greboid/todo/internal/models"
 	"github.com/greboid/todo/internal/schedule"
 )
+
+// openapiYAML is the embedded OpenAPI 3.0 spec describing the /api surface.
+//
+//go:embed openapi.yaml
+var openapiYAML []byte
+
+// swaggerFS embeds the third-party Swagger UI assets (swagger-ui-bundle.js and
+// swagger-ui.css) copied from the `swagger-ui-dist` npm package by `pnpm run
+// copy:swagger`. They are build artifacts; the docs page itself is rendered from
+// swaggerPageTpl, not stored here.
+//
+//go:embed all:swagger-ui
+var swaggerFS embed.FS
+
+// swaggerUIFiles is the swagger-ui subtree of swaggerFS, served as static files.
+var swaggerUIFiles = func() fs.FS {
+	sub, err := fs.Sub(swaggerFS, "swagger-ui")
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}()
+
+// swaggerAssets serves the embedded Swagger UI files under /api/swagger/.
+var swaggerAssets = http.StripPrefix("/api/swagger/", http.FileServerFS(swaggerUIFiles))
+
+// swaggerPageTpl is the Swagger UI page, rendered so the spec URL is injected
+// and the HTML stays in committed Go source. Only the third-party JS/CSS live
+// in the gitignored swagger-ui build dir.
+var swaggerPageTpl = template.Must(template.New("swagger").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Todo API &mdash; Swagger UI</title>
+  <link rel="stylesheet" href="swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="swagger-ui-bundle.js"></script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      window.ui = SwaggerUIBundle({
+        url: "{{.SpecURL}}",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: "BaseLayout"
+      });
+    });
+  </script>
+</body>
+</html>`))
 
 // Handler wires the todo HTTP routes. It holds no per-request state.
 type Handler struct {
@@ -44,7 +101,12 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/boards", h.createBoard)
 	mux.HandleFunc("GET /api/boards/{id}", h.getBoard)
 	mux.HandleFunc("PATCH /api/boards/{id}", h.updateBoard)
-	mux.HandleFunc("DELETE /api/boards/{id}", h.deleteBoard)
+	// API docs: embedded OpenAPI spec and a self-hosted Swagger UI.
+	mux.HandleFunc("GET /api/openapi.yaml", h.openapiSpec)
+	mux.HandleFunc("GET /api/swagger/", h.swaggerUI)
+	mux.HandleFunc("GET /api/swagger", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/api/swagger/", http.StatusMovedPermanently)
+	})
 	return mux
 }
 
@@ -309,6 +371,23 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// openapiSpec serves the embedded OpenAPI 3.0 spec as YAML.
+func (h *Handler) openapiSpec(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	_, _ = w.Write(openapiYAML)
+}
+
+// swaggerUI renders the Swagger UI page at the directory root and serves the
+// embedded third-party JS/CSS for any sub-path.
+func (h *Handler) swaggerUI(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimPrefix(r.URL.Path, "/api/swagger/") == "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = swaggerPageTpl.Execute(w, struct{ SpecURL string }{SpecURL: "/api/openapi.yaml"})
+		return
+	}
+	swaggerAssets.ServeHTTP(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
