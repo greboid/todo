@@ -12,14 +12,25 @@ package filter
 import (
 	"fmt"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// SortKey is a single ordered sort criterion attached to a [Query]. Field is
+// one of "priority", "label", "date"; Desc reverses the comparison. Multiple
+// SortKeys apply in declared order with stable tie-breaking on position/id.
+type SortKey struct {
+	Field string
+	Desc  bool
+}
 
 // Item is the projection of a todo needed to evaluate a filter.
 type Item struct {
 	ID            int64
 	ParentID      *int64
+	Position      int // sibling index (used for stable ordering when sorting)
 	Title         string
 	Description   string
 	Completed     bool
@@ -41,6 +52,7 @@ type Query struct {
 	date          *dateSpec
 	dateNeg       bool
 	has           map[string]bool // keys: complete, label, recur, date, priority
+	sorts         []SortKey       // ordered sort criteria; empty = unchanged order
 }
 
 // Empty reports whether the query has no criteria (matches everything).
@@ -115,6 +127,31 @@ func Parse(input string) (Query, error) {
 				default:
 					return Query{}, fmt.Errorf("invalid has filter %q: use complete, label, priority, recur, or date", val)
 				}
+			case "sort", "sortby":
+				// Sort supports a leading "!" for descending order, e.g.
+				// sort:!priority. Field must be priority, label, or date. The
+				// token may be repeated; each adds a tiebreaker applied in
+				// declared order (stable on position/id afterwards).
+				k := SortKey{Field: strings.ToLower(val)}
+				if strings.HasPrefix(k.Field, "!") {
+					k.Desc = true
+					k.Field = strings.ToLower(val[1:])
+				}
+				switch k.Field {
+				case "priority", "p", "label", "l", "date", "due", "duedate":
+				default:
+					return Query{}, fmt.Errorf("invalid sort field %q: use priority, label, or date", val)
+				}
+				// Normalize aliases to canonical field names.
+				switch k.Field {
+				case "p":
+					k.Field = "priority"
+				case "l":
+					k.Field = "label"
+				case "due", "duedate":
+					k.Field = "date"
+				}
+				q.sorts = append(q.sorts, k)
 			}
 			continue
 		}
@@ -305,4 +342,122 @@ func Apply(items []Item, q Query, today string) []Item {
 		}
 	}
 	return out
+}
+
+// Sorts returns the ordered sort criteria attached to q (empty when none). It
+// is read-only so callers cannot mutate the query's sort list.
+func (q Query) Sorts() []SortKey {
+	out := make([]SortKey, len(q.sorts))
+	copy(out, q.sorts)
+	return out
+}
+
+// Sort reorders items so each sibling group is sorted by the query's sort keys
+// in declared order, with a stable tie-break on position then id so the
+// pre-existing manual order is preserved for equal keys. It also reassigns
+// each item's Position to its new 0-based sibling index, so downstream
+// consumers (e.g. the rendered tree) reflect the new order without bespoke
+// handling. When q has no sort keys the slice is returned unchanged.
+//
+// Sort operates per sibling group (items sharing a parent) so the tree's
+// hierarchical structure is preserved — sorting never moves a todo out of its
+// parent.
+func Sort(items []Item, q Query) []Item {
+	if len(q.sorts) == 0 {
+		return items
+	}
+	type entry struct {
+		idx int
+		it  Item
+	}
+	// Group items by parent (nil = root). Bucket key is the string form of the
+	// parent id bytes so roots (nil) share one bucket distinct from id 0.
+	buckets := make(map[string][]entry)
+	keys := make([]string, 0)
+	for i, it := range items {
+		k := parentKey(it.ParentID)
+		if _, ok := buckets[k]; !ok {
+			keys = append(keys, k)
+		}
+		buckets[k] = append(buckets[k], entry{idx: i, it: it})
+	}
+	for _, k := range keys {
+		grp := buckets[k]
+		sort.SliceStable(grp, func(i, j int) bool {
+			return lessItem(grp[i].it, grp[j].it, q.sorts)
+		})
+		buckets[k] = grp
+	}
+	// Reassign positions within each group; items keep their flat-slot index.
+	out := make([]Item, len(items))
+	copy(out, items)
+	for _, k := range keys {
+		grp := buckets[k]
+		for i, e := range grp {
+			out[e.idx].Position = i
+		}
+	}
+	return out
+}
+
+// parentKey returns a stable string bucket key for a parent id. nil (root)
+// maps to "" and is distinct from any real id.
+func parentKey(p *int64) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.FormatInt(*p, 36)
+}
+
+// lessItem reports whether a sorts before b given the ordered sort keys. Each
+// key is applied in turn; the first differing comparison wins. Equal items
+// fall through to a stable tie-break (handled by the stable sort wrapper).
+func lessItem(a, b Item, keys []SortKey) bool {
+	for _, k := range keys {
+		c := compareKey(a, b, k.Field)
+		if k.Desc {
+			c = -c
+		}
+		if c != 0 {
+			return c < 0
+		}
+	}
+	return false
+}
+
+// compareKey returns -1/0/1 for a vs b on the named field. Empty values sort
+// last (after non-empty), so todos without a due date/priority/label group at
+// the bottom of an ascending sort. This matches Todoist's convention.
+func compareKey(a, b Item, field string) int {
+	switch field {
+	case "priority":
+		return cmpEmptyLast(a.Priority, b.Priority)
+	case "label":
+		return cmpEmptyLast(firstLabel(a.Labels), firstLabel(b.Labels))
+	case "date":
+		return cmpEmptyLast(a.DueDate, b.DueDate)
+	}
+	return 0
+}
+
+func firstLabel(ls []string) string {
+	if len(ls) == 0 {
+		return ""
+	}
+	return ls[0]
+}
+
+// cmpEmptyLast compares two strings, treating "" as greater than any non-empty
+// value so missing attributes sort last under ascending order.
+func cmpEmptyLast(a, b string) int {
+	switch {
+	case a == "" && b == "":
+		return 0
+	case a == "":
+		return 1
+	case b == "":
+		return -1
+	default:
+		return strings.Compare(a, b)
+	}
 }

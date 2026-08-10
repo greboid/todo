@@ -2,6 +2,7 @@ package filter
 
 import (
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -152,10 +153,126 @@ func TestParseErrors(t *testing.T) {
 	for _, tc := range []struct{ query, want string }{
 		{"date:foo", "invalid date filter"},
 		{"has:xyz", "invalid has filter"},
+		{"sort:banana", "invalid sort field"},
 	} {
 		_, err := Parse(tc.query)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("Parse(%q) = %v, want error containing %q", tc.query, err, tc.want)
 		}
+	}
+}
+
+// rootOrder returns the root items' IDs in ascending Position order after a
+// sort. Since Sort reorders via Position (not flat slice order), this is the
+// correct way to observe the rendered order.
+func rootOrder(board []Item, q Query) []int64 {
+	out := Sort(Apply(board, q, today), q)
+	roots := make([]Item, 0, len(out))
+	for _, it := range out {
+		if it.ParentID == nil {
+			roots = append(roots, it)
+		}
+	}
+	sort.SliceStable(roots, func(i, j int) bool { return roots[i].Position < roots[j].Position })
+	r := make([]int64, len(roots))
+	for i, it := range roots {
+		r[i] = it.ID
+	}
+	return r
+}
+
+// TestSortOrder verifies each sort field orders roots ascending, with empty
+// values (no priority/label/date) landing last.
+func TestSortOrder(t *testing.T) {
+	board := sampleBoard()
+
+	q, err := Parse("sort:priority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Priorities present: high(7), low(8); empties sort last: 1,3,4,5,6.
+	if got := rootOrder(board, q); !reflect.DeepEqual(got, []int64{7, 8, 1, 3, 4, 5, 6}) {
+		t.Errorf("sort:priority = %v", got)
+	}
+
+	q, err = Parse("sort:date")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Dated roots ascending: 4(08-05),3(08-10),6(09-09); undated last: 1,5,7,8.
+	if got := rootOrder(board, q); !reflect.DeepEqual(got, []int64{4, 3, 6, 1, 5, 7, 8}) {
+		t.Errorf("sort:date = %v", got)
+	}
+
+	q, err = Parse("sort:label")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Labeled roots ascending by first label: urgent(4), work(6); unlabeled
+	// last: 1,3,5,7,8.
+	if got := rootOrder(board, q); !reflect.DeepEqual(got, []int64{4, 6, 1, 3, 5, 7, 8}) {
+		t.Errorf("sort:label = %v", got)
+	}
+}
+
+// TestSortDesc reverses the comparison via the leading "!".
+func TestSortDesc(t *testing.T) {
+	q, err := Parse("sort:!priority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Descending: empties (compared as greatest, then sign-flipped to least)
+	// come first, then low(8), high(7).
+	got := rootOrder(sampleBoard(), q)
+	if !reflect.DeepEqual(got, []int64{1, 3, 4, 5, 6, 8, 7}) {
+		t.Errorf("sort:!priority = %v", got)
+	}
+}
+
+// TestSortMultipleKeys applies sort keys in order: primary date, secondary
+// priority as a tiebreaker among the undated roots.
+func TestSortMultipleKeys(t *testing.T) {
+	q, err := Parse("sort:date sort:priority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Dated ascending: 4,3,6. Undated group (1,5,7,8) broken by priority:
+	// high(7),low(8) before the truly empty (1,5).
+	got := rootOrder(sampleBoard(), q)
+	if !reflect.DeepEqual(got, []int64{4, 3, 6, 7, 8, 1, 5}) {
+		t.Errorf("sort:date sort:priority = %v", got)
+	}
+}
+
+// TestSortReassignsPosition confirms Sort rewrites Position to the new 0-based
+// sibling index so downstream consumers see the new order.
+func TestSortReassignsPosition(t *testing.T) {
+	q, err := Parse("sort:priority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := Sort(Apply(sampleBoard(), q, today), q)
+	byID := make(map[int64]int, len(out))
+	for _, it := range out {
+		byID[it.ID] = it.Position
+	}
+	// Roots: high(7)->0, low(8)->1, then empties 1,3,4,5,6 -> 2..6. Child 2
+	// is the only item in its sibling group so its position is 0.
+	want := map[int64]int{7: 0, 8: 1, 1: 2, 3: 3, 4: 4, 5: 5, 6: 6, 2: 0}
+	if !reflect.DeepEqual(byID, want) {
+		t.Errorf("positions = %v, want %v", byID, want)
+	}
+}
+
+// TestSortNoKeys is a no-op: with no sort tokens the slice comes back unchanged.
+func TestSortNoKeys(t *testing.T) {
+	q, err := Parse("label:work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := Apply(sampleBoard(), q, today)
+	out := Sort(in, q)
+	if !reflect.DeepEqual(in, out) {
+		t.Errorf("Sort with no keys should be a no-op")
 	}
 }
