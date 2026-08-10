@@ -99,6 +99,7 @@ type label struct {
 	bun.BaseModel `bun:"table:labels"`
 	ID            int64  `bun:"id,pk,autoincrement"`
 	Name          string `bun:"name,notnull,unique"`
+	Color         string `bun:"color,default:''"`
 }
 
 type todoLabel struct {
@@ -162,6 +163,14 @@ func (d *DB) migrate(ctx context.Context) error {
 			_, err := d.db.NewCreateTable().Model((*label)(nil)).IfNotExists().Exec(ctx)
 			return err
 		},
+		// Add the color column to pre-existing labels tables. IF NOT EXISTS
+		// on CREATE TABLE does not add new columns to an existing table, so
+		// we ALTER explicitly. Wrapped in a column-existence check so it is
+		// a no-op once the column is present (Postgres lacks ADD COLUMN IF NOT
+		// EXISTS in older versions; we check information_schema uniformly).
+		func(ctx context.Context) error {
+			return addColumnIfMissing(ctx, d.db, "labels", "color", "TEXT NOT NULL DEFAULT ''")
+		},
 		func(ctx context.Context) error {
 			_, err := d.db.NewCreateTable().Model((*todoLabel)(nil)).IfNotExists().
 				ForeignKey(`("todo_id") REFERENCES todos(id) ON DELETE CASCADE`).
@@ -190,6 +199,41 @@ func (d *DB) migrate(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// addColumnIfMissing adds a column to a table if it does not already exist.
+// Works on both SQLite and Postgres via a uniform information_schema /
+// pragma_table_info check.
+func addColumnIfMissing(ctx context.Context, db *bun.DB, table, column, decl string) error {
+	var count int
+	// Postgres: check information_schema.columns. SQLite: check
+	// pragma_table_info. We detect the dialect at runtime.
+	switch db.Dialect().Name().String() {
+	case "pg":
+		err := db.NewSelect().
+			ColumnExpr("COUNT(*)").
+			TableExpr("information_schema.columns").
+			Where("table_name = ?", table).
+			Where("column_name = ?", column).
+			Scan(ctx, &count)
+		if err != nil {
+			return err
+		}
+	default:
+		err := db.NewSelect().
+			ColumnExpr("COUNT(*)").
+			TableExpr("pragma_table_info(?)", table).
+			Where("name = ?", column).
+			Scan(ctx, &count)
+		if err != nil {
+			return err
+		}
+	}
+	if count > 0 {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
+	return err
 }
 
 // ListAll returns every todo on the given board with its labels attached.
@@ -263,9 +307,10 @@ func (d *DB) attachLabels(ctx context.Context, ts []models.Todo) error {
 	var rows []struct {
 		TodoID int64  `bun:"todo_id"`
 		Name   string `bun:"name"`
+		Color  string `bun:"color"`
 	}
 	err := d.db.NewSelect().
-		ColumnExpr("tl.todo_id, l.name").
+		ColumnExpr("tl.todo_id, l.name, l.color").
 		TableExpr("todo_labels AS tl").
 		Join("JOIN labels AS l ON l.id = tl.label_id").
 		Where("tl.todo_id IN (?)", bun.In(ids)).
@@ -275,11 +320,14 @@ func (d *DB) attachLabels(ctx context.Context, ts []models.Todo) error {
 		return err
 	}
 	byID := make(map[int64][]string, len(ts))
+	colorByID := make(map[int64][]models.LabelColor, len(ts))
 	for _, r := range rows {
 		byID[r.TodoID] = append(byID[r.TodoID], r.Name)
+		colorByID[r.TodoID] = append(colorByID[r.TodoID], models.LabelColor{Name: r.Name, Color: r.Color})
 	}
 	for i := range ts {
 		ts[i].Labels = byID[ts[i].ID]
+		ts[i].LabelColors = colorByID[ts[i].ID]
 	}
 	return nil
 }
@@ -799,33 +847,57 @@ func (d *DB) Delete(ctx context.Context, id int64) error {
 // ListLabels returns all known labels, combining ad-hoc labels (attached to
 // todos) with any predefined labels. The two sets are fetched separately and
 // merged in Go (bun parenthesizes compound selects per-branch, which SQLite
-// rejects), then de-duplicated and sorted.
-func (d *DB) ListLabels(ctx context.Context) ([]string, error) {
-	var adhoc, predefined []string
-	if err := d.db.NewSelect().ColumnExpr("name").TableExpr("labels").Scan(ctx, &adhoc); err != nil {
+// rejects), then de-duplicated and sorted. Each label carries its colour (a
+// hex string, empty when no user-defined colour is set).
+func (d *DB) ListLabels(ctx context.Context) ([]models.Label, error) {
+	var adhoc []struct {
+		Name  string `bun:"name"`
+		Color string `bun:"color"`
+	}
+	if err := d.db.NewSelect().ColumnExpr("name, color").TableExpr("labels").Scan(ctx, &adhoc); err != nil {
 		return nil, err
 	}
+	var predefined []string
 	if err := d.db.NewSelect().ColumnExpr("name").TableExpr("predefined_labels").Scan(ctx, &predefined); err != nil {
 		return nil, err
 	}
+	colorOf := make(map[string]string, len(adhoc))
+	out := make([]models.Label, 0, len(adhoc)+len(predefined))
 	seen := make(map[string]struct{}, len(adhoc)+len(predefined))
-	out := make([]string, 0, len(adhoc)+len(predefined))
-	for _, n := range adhoc {
-		if _, dup := seen[n]; dup {
+	for _, l := range adhoc {
+		if _, dup := seen[l.Name]; dup {
 			continue
 		}
-		seen[n] = struct{}{}
-		out = append(out, n)
+		seen[l.Name] = struct{}{}
+		colorOf[l.Name] = l.Color
+		out = append(out, models.Label{Name: l.Name, Color: l.Color})
 	}
 	for _, n := range predefined {
 		if _, dup := seen[n]; dup {
 			continue
 		}
 		seen[n] = struct{}{}
-		out = append(out, n)
+		// Predefined labels have no colour in the predefined_labels table;
+		// look up any colour the ad-hoc labels table may hold for the same name.
+		out = append(out, models.Label{Name: n, Color: colorOf[n]})
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// SetLabelColor sets the user-defined colour for a label. An empty colour
+// clears it so the label reverts to the auto-assigned palette colour.
+func (d *DB) SetLabelColor(ctx context.Context, name string, color string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ErrInvalidInput
+	}
+	// Ensure the label exists (upsert) so colours can be set for labels not
+	// yet attached to any todo.
+	_, err := d.db.NewInsert().Model(&label{Name: name, Color: color}).
+		On("CONFLICT (name) DO UPDATE SET color = excluded.color").
+		Exec(ctx)
+	return err
 }
 
 // AddPredefinedLabel records a label as predefined so it always appears in the

@@ -32,6 +32,27 @@ type CreateLabel struct {
 	Name string `json:"name"`
 }
 
+// Label is a label with its colour. Colour is a hex string (e.g. "#ef4444")
+// or empty when no user-defined colour is set (the client picks from a
+// palette deterministically by name).
+type Label struct {
+	Name  string `json:"name"`
+	Color string `json:"color,omitempty"`
+}
+
+// LabelColor pairs a label name with its colour for inline rendering on todos.
+type LabelColor struct {
+	Name  string `json:"name"`
+	Color string `json:"color,omitempty"`
+}
+
+// UpdateLabel is the payload for changing a label's colour. Colour is a hex
+// string; an empty string clears the user-defined colour so the label reverts
+// to the auto-assigned palette colour.
+type UpdateLabel struct {
+	Color *string `json:"color"`
+}
+
 // CompleteTodo is the payload for the /complete endpoint.
 type CompleteTodo struct {
 	Completed bool `json:"completed"`
@@ -109,18 +130,19 @@ func (r Recurrence) Valid() bool {
 
 // Todo represents a single todo item.
 type Todo struct {
-	ID              int64       `json:"id"`
-	BoardID         int64       `json:"boardId"`
-	Title           string      `json:"title"`
-	Description     string      `json:"description"`
-	Completed       bool        `json:"completed"`
-	ParentID        *int64      `json:"parentId,omitempty"`
-	Position        int         `json:"position"`
-	Labels          []string    `json:"labels,omitempty"`
-	DueDate         string      `json:"dueDate,omitempty"`         // "YYYY-MM-DD", "" = none
-	Recurrence      *Recurrence `json:"recurrence,omitempty"`      // nil = non-recurring
-	ScheduleText    string      `json:"scheduleText,omitempty"`    // canonical free-text seed for the edit field (computed, not stored)
-	RecurrenceLabel string      `json:"recurrenceLabel,omitempty"` // short badge label, e.g. "2 weeks on Mon, Wed" (computed, not stored)
+	ID              int64        `json:"id"`
+	BoardID         int64        `json:"boardId"`
+	Title           string       `json:"title"`
+	Description     string       `json:"description"`
+	Completed       bool         `json:"completed"`
+	ParentID        *int64       `json:"parentId,omitempty"`
+	Position        int          `json:"position"`
+	Labels          []string     `json:"labels,omitempty"`
+	LabelColors     []LabelColor `json:"labelColors,omitempty"`
+	DueDate         string       `json:"dueDate,omitempty"`         // "YYYY-MM-DD", "" = none
+	Recurrence      *Recurrence  `json:"recurrence,omitempty"`      // nil = non-recurring
+	ScheduleText    string       `json:"scheduleText,omitempty"`    // canonical free-text seed for the edit field (computed, not stored)
+	RecurrenceLabel string       `json:"recurrenceLabel,omitempty"` // short badge label, e.g. "2 weeks on Mon, Wed" (computed, not stored)
 }
 
 // CreateTodo is the payload for creating a new todo.

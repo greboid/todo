@@ -51,6 +51,7 @@ export const api = {
     return req('/schedule/extract', { method: 'POST', body: { text, today } });
   },
   listLabels: () => req('/labels'),
+  updateLabel: (name, color) => req(`/labels/${encodeURIComponent(name)}`, { method: 'PUT', body: { color } }),
   addPredefinedLabel: (name) => req('/labels/predefined', { method: 'POST', body: { name } }),
   removePredefinedLabel: (name) => req(`/labels/predefined/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   listBoards: () => req('/boards'),

@@ -24,7 +24,35 @@ const storage = {
 // Shared ordering: by position, falling back to id for stable ties.
 const byPositionThenId = (a, b) => a.position - b.position || a.id - b.id;
 
+// Palette of colours used when a label has no user-defined colour. Picked
+// deterministically by hashing the label name so the same label always gets
+// the same colour across reloads and clients.
+const LABEL_PALETTE = [
+  '#ef4444', // red
+  '#f97316', // orange
+  '#f59e0b', // amber
+  '#84cc16', // lime
+  '#22c55e', // green
+  '#14b8a6', // teal
+  '#06b6d4', // cyan
+  '#3b82f6', // blue
+  '#6366f1', // indigo
+  '#8b5cf6', // violet
+  '#ec4899', // pink
+  '#64748b', // slate
+];
+
+function labelColor(name, color) {
+  if (color) return color;
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  }
+  return LABEL_PALETTE[Math.abs(hash) % LABEL_PALETTE.length];
+}
+
 export const store = createStore();
+export { labelColor, LABEL_PALETTE };
 
 function createStore() {
   // todos holds the server's response for the active board + filter: every
@@ -341,6 +369,12 @@ function createStore() {
     await loadLabels();
   }
 
+  async function updateLabelColor(name, color) {
+    await api.updateLabel(name, color);
+    await loadLabels();
+    await load();
+  }
+
   return {
     get todos() {
       return todos;
@@ -423,5 +457,6 @@ function createStore() {
     loadLabels,
     addPredefinedLabel,
     removePredefinedLabel,
+    updateLabelColor,
   };
 }

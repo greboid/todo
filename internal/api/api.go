@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -97,6 +98,7 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/schedule/parse", h.parseSchedule)
 	mux.HandleFunc("POST /api/schedule/extract", h.extractSchedule)
 	mux.HandleFunc("GET /api/labels", h.listLabels)
+	mux.HandleFunc("PUT /api/labels/{name}", h.updateLabel)
 	mux.HandleFunc("POST /api/labels/predefined", h.addPredefinedLabel)
 	mux.HandleFunc("DELETE /api/labels/predefined/{name}", h.removePredefinedLabel)
 	mux.HandleFunc("GET /api/boards", h.listBoards)
@@ -272,6 +274,34 @@ func (h *Handler) listLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, nonNil(labels))
+}
+
+var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+func (h *Handler) updateLabel(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	var in models.UpdateLabel
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	color := ""
+	if in.Color != nil {
+		color = strings.TrimSpace(*in.Color)
+		if color != "" && !hexColorRe.MatchString(color) {
+			writeErr(w, http.StatusBadRequest, errors.New("color must be a hex string like #ef4444"))
+			return
+		}
+	}
+	if err := h.store.SetLabelColor(r.Context(), name, color); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, models.Label{Name: name, Color: color})
 }
 
 func (h *Handler) addPredefinedLabel(w http.ResponseWriter, r *http.Request) {
