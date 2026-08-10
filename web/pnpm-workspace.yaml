@@ -1,5 +1,4 @@
-allowBuilds:
-  '@scarf/scarf': false
-  esbuild: true
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
 onlyBuiltDependencies:
   - esbuild
