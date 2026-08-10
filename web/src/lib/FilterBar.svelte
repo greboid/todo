@@ -1,5 +1,6 @@
 <script>
   import { store } from './store.svelte.js';
+  import Icon from './Icon.svelte';
 </script>
 
 <div class="filter">
@@ -11,7 +12,7 @@
     oninput={(e) => store.setFilterText(e.target.value)}
   />
   {#if store.filterActive}
-    <button class="ghost clear" onclick={() => store.clearFilter()}>✕</button>
+    <button class="ghost clear" onclick={() => store.clearFilter()}><Icon name="close" size={14} /></button>
   {/if}
 </div>
 

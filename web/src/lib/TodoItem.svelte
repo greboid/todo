@@ -1,6 +1,7 @@
 <script>
   import { store } from './store.svelte.js';
   import NewTodo from './NewTodo.svelte';
+  import Icon from './Icon.svelte';
   import Self from './TodoItem.svelte';
   import { focus } from './actions.js';
   import { api } from './api.js';
@@ -352,19 +353,19 @@
       {/if}
       {#if todo.dueDate}
         {@const overdue = !todo.completed && todo.dueDate < todayISO()}
-        <span class="badge due {overdue ? 'overdue' : ''}">📅 {todo.dueDate}</span>
+        <span class="badge due {overdue ? 'overdue' : ''}"><Icon name="calendar" size={12} /> {todo.dueDate}</span>
       {/if}
       {#if todo.recurrence}
-        <span class="badge recur" title={todo.recurrenceLabel}>↻ {todo.recurrence.fromCompletion ? 'every!' : 'every'} {todo.recurrenceLabel}</span>
+        <span class="badge recur" title={todo.recurrenceLabel}><Icon name="repeat" size={12} /> {todo.recurrence.fromCompletion ? 'every!' : 'every'} {todo.recurrenceLabel}</span>
       {/if}
       <span class="actions">
         <button class="ghost complete-btn" onclick={toggleCompleted} aria-label={todo.completed ? 'Mark incomplete' : 'Mark complete'}>
-          {todo.completed ? '↺' : '✓'}
+          <Icon name={todo.completed ? 'undo' : 'check'} size={16} />
         </button>
-        <button class="ghost" onclick={startEdit} aria-label="Edit">✎</button>
-        <button class="ghost" onclick={openLabelPicker} aria-label="Labels">🏷</button>
-        <button class="ghost" onclick={() => (addingChild = !addingChild)} aria-label="Add child">＋</button>
-        <button class="ghost danger" onclick={onDelete} aria-label="Delete">🗑</button>
+        <button class="ghost" onclick={startEdit} aria-label="Edit"><Icon name="edit" size={16} /></button>
+        <button class="ghost" onclick={openLabelPicker} aria-label="Labels"><Icon name="tag" size={16} /></button>
+        <button class="ghost" onclick={() => (addingChild = !addingChild)} aria-label="Add child"><Icon name="plus" size={16} /></button>
+        <button class="ghost danger" onclick={onDelete} aria-label="Delete"><Icon name="trash" size={16} /></button>
       </span>
     </div>
   {/if}
@@ -529,6 +530,9 @@
     font-size: 12px;
   }
   .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     background: var(--drop);
     color: var(--accent-strong);
     border: 1px solid var(--accent-tint);
