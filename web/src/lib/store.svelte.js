@@ -49,6 +49,20 @@ function createStore() {
   let editingDirty = $state(false);
   let rejectionTick = $state(0);
 
+  // --- Filter ---
+  // Narrows visible todos via a structured text query. Syntax:
+  //   label:<name>   filter by label (repeatable, OR semantics)
+  //   date:<value>   filter by due date — presets or YYYY-MM-DD or range
+  //   <free text>    searches title + description (case-insensitive)
+  // Examples: "date:week", "label:urgent meeting", "date:2026-08-15",
+  //           "date:\"2026-08-01..2026-08-31\" label:work"
+  // Defaults to "date:week" (next 7 days, including overdue). Persisted.
+  let filterText = $state(storage.get('todo:filter') || 'date:week');
+
+  function persistFilter() {
+    storage.set('todo:filter', filterText);
+  }
+
   function byId(id) {
     return todos.find((t) => t.id === id);
   }
@@ -82,12 +96,126 @@ function createStore() {
       .sort(byPositionThenId);
   }
 
-  // Display view of children: completed todos are filtered out unless the
-  // user has opted to show them. Position math (move/drop) keeps using the
-  // unfiltered childrenOf so indices stay aligned with the server.
+  // Display view of children. Applies two layers:
+  //   1. Completion filter — completed todos are hidden unless showCompleted.
+  //   2. Active search filter (text/labels/date) — when active, only todos
+  //      that match OR are ancestors of a matching descendant are shown.
+  //      Ancestors are always shown (even if completed) so the tree stays
+  //      connected. Position math (move/drop) keeps using the unfiltered
+  //      childrenOf so indices stay aligned with the server.
   function visibleChildrenOf(parentId) {
     const all = childrenOf(parentId);
-    return showCompleted ? all : all.filter((t) => !t.completed);
+    const fv = computeFilterView();
+    if (!fv) return showCompleted ? all : all.filter((t) => !t.completed);
+    return all.filter((t) => {
+      if (!fv.visible.has(t.id)) return false;
+      if (fv.matching.has(t.id)) return showCompleted || !t.completed;
+      return true; // context-only ancestor — always visible
+    });
+  }
+
+  // Whether any filter criterion is active (beyond "show everything").
+  function filterIsActive() {
+    return filterText.trim() !== '';
+  }
+
+  // ISO date (YYYY-MM-DD) in the user's local timezone.
+  function todayISO() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function offsetISO(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  // Parse a date filter value into the result struct. Supports presets
+  // (week, overdue, none, today, tomorrow), a single YYYY-MM-DD, or a
+  // YYYY-MM-DD..YYYY-MM-DD range. Unrecognized values are silently ignored.
+  function parseDate(v, r) {
+    const s = v.toLowerCase().trim();
+    if (s === 'week' || s === 'this-week' || s === 'next-week') { r.dateMode = 'week'; return; }
+    if (s === 'overdue' || s === 'past') { r.dateMode = 'overdue'; return; }
+    if (s === 'none' || s === 'nodate' || s === 'no-date') { r.dateMode = 'nodate'; return; }
+    if (s === 'today') { r.dateMode = 'custom'; r.dateFrom = r.dateTo = todayISO(); return; }
+    if (s === 'tomorrow') { const d = offsetISO(1); r.dateMode = 'custom'; r.dateFrom = r.dateTo = d; return; }
+    const rng = s.match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/);
+    if (rng) { r.dateMode = 'custom'; r.dateFrom = rng[1]; r.dateTo = rng[2]; return; }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { r.dateMode = 'custom'; r.dateFrom = r.dateTo = s; return; }
+  }
+
+  // Parse the filter query text into structured criteria.
+  // Tokenises into key:value qualifiers (value may be quoted) and bare text.
+  function parseFilter(input) {
+    const r = { text: '', labels: [], dateMode: 'all', dateFrom: '', dateTo: '' };
+    if (!input || !input.trim()) return r;
+    const re = /(\w+):(?:"([^"]*)"|(\S+))|("[^"]*"|\S+)/g;
+    const parts = [];
+    let m;
+    while ((m = re.exec(input)) !== null) {
+      if (m[1]) {
+        const key = m[1].toLowerCase();
+        const val = m[2] ?? m[3] ?? '';
+        if (key === 'label' || key === 'l') { r.labels.push(val); continue; }
+        if (key === 'date' || key === 'd') { parseDate(val, r); continue; }
+      }
+      parts.push((m[4] ?? '').replace(/^"|"$/g, ''));
+    }
+    r.text = parts.filter(Boolean).join(' ');
+    return r;
+  }
+
+  // Compute the set of matching todo IDs plus their ancestors (shown for tree
+  // context). Returns null when the filter is inactive. O(n) per call.
+  function computeFilterView() {
+    if (!filterIsActive()) return null;
+    const f = parseFilter(filterText);
+    const today = todayISO();
+    const weekEnd = offsetISO(7);
+    const q = f.text.toLowerCase();
+    const sel = f.labels;
+    const test = (t) => {
+      if (q) {
+        const hay = `${t.title} ${t.description || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (sel.length > 0) {
+        const labels = t.labels || [];
+        if (!sel.some((l) => labels.includes(l))) return false;
+      }
+      switch (f.dateMode) {
+        case 'week':
+          if (t.dueDate && t.dueDate > weekEnd) return false;
+          break;
+        case 'overdue':
+          if (!t.dueDate || t.dueDate >= today) return false;
+          break;
+        case 'nodate':
+          if (t.dueDate) return false;
+          break;
+        case 'custom':
+          if (!t.dueDate) return false;
+          if (f.dateFrom && t.dueDate < f.dateFrom) return false;
+          if (f.dateTo && t.dueDate > f.dateTo) return false;
+          break;
+      }
+      return true;
+    };
+    const matching = new Set();
+    for (const t of todos) {
+      if (test(t)) matching.add(t.id);
+    }
+    // Add ancestors of every match so the tree stays connected.
+    const visible = new Set(matching);
+    for (const id of matching) {
+      let cur = byId(id);
+      while (cur && cur.parentId != null) {
+        visible.add(cur.parentId);
+        cur = byId(cur.parentId);
+      }
+    }
+    return { matching, visible };
   }
 
   function setShowCompleted(value) {
@@ -353,6 +481,29 @@ function createStore() {
     },
     get completedCount() {
       return todos.filter((t) => t.completed).length;
+    },
+    get filterText() {
+      return filterText;
+    },
+    get filterActive() {
+      return filterIsActive();
+    },
+    get filterResultCount() {
+      const fv = computeFilterView();
+      if (!fv) return null;
+      let n = 0;
+      for (const t of todos) {
+        if (fv.matching.has(t.id) && (showCompleted || !t.completed)) n++;
+      }
+      return n;
+    },
+    setFilterText(text) {
+      filterText = text;
+      persistFilter();
+    },
+    clearFilter() {
+      filterText = '';
+      persistFilter();
     },
     isEditing(id) {
       return editingId === id;
