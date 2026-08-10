@@ -5,7 +5,15 @@ permissions:
 
 on:
   push:
+    branches: [master]
+    tags: ['v*']
   pull_request:
+
+concurrency:
+  # One in-flight run per workflow+ref; a newer push/PR update cancels the
+  # superseded run instead of running to completion.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
