@@ -8,7 +8,7 @@
   import { focus } from './actions.js';
   import { api } from './api.js';
 
-  marked.setOptions({
+  marked.use({
     gfm: true,
     breaks: true,
     renderer: {
@@ -56,14 +56,12 @@
   let priorityQuery = $state('');
   let editingColorPriority = $state(null);
 
-  // Tracks where a dragged item would land if dropped here ("before", "after",
-  // "into"). Used to render an insertion indicator.
+  // Drop target state for this row. Dragging is initiated from the drag
+  // handle (which is its own draggable element); the row itself is never
+  // draggable so clicks, text selection, and buttons always work. The row is
+  // only a drop target.
   let dropZone = $state(null);
   let dragOverSelf = $state(false);
-  // Dragging is initiated only from the drag handle (left side). mousedown on
-  // the handle arms the row; the row is draggable only while armed so clicks
-  // and text selection elsewhere don't start a drag.
-  let dragArmed = $state(false);
 
   // Shake animation: plays on this item when it refuses to yield its edit slot.
   let lastRejection = $state(0);
@@ -100,9 +98,11 @@
   function onHeadClick(e) {
     // Nothing to reveal when there's no description; double-click still edits.
     if (!todo.description) return;
-    // Ignore clicks on the checkbox, buttons, or the action cluster.
+    // Ignore clicks on the checkbox, buttons, the action cluster, or the drag
+    // handle (those are interactive controls, not expand toggles).
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || e.target.closest('.actions')) return;
+    if (e.target.closest('.drag-handle')) return;
     // A rapid second click is the start of a double-click — cancel the toggle.
     if (clickTimer) {
       clearTimeout(clickTimer);
@@ -344,11 +344,6 @@
     // re-fire this handler with the ancestor's `todo`, overwriting the dragged
     // id. Stop propagation so only the dragged element's own handler runs.
     e.stopPropagation();
-    if (!dragArmed) {
-      // Drag wasn't started from the handle: cancel it.
-      e.preventDefault();
-      return;
-    }
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/x-todo-id', String(todo.id));
     // Stop the row from being treated as its own drop target while dragging.
@@ -356,7 +351,6 @@
   }
 
   function onDragEnd() {
-    dragArmed = false;
     dragOverSelf = false;
     dropZone = null;
   }
@@ -426,13 +420,10 @@
 <div
   bind:this={rootEl}
   class={classes}
-  draggable={dragArmed && !editing}
   role="treeitem"
   tabindex="0"
   aria-selected={todo.completed}
   aria-expanded={children.length > 0}
-  ondragstart={onDragStart}
-  ondragend={onDragEnd}
   ondragover={onDragOver}
   ondragleave={onDragLeave}
   ondrop={resolveDrop}
@@ -476,8 +467,9 @@
         tabindex="-1"
         aria-label="Drag to reorder"
         title="Drag to reorder"
-        onmousedown={(e) => { if (!editing) { dragArmed = true; } }}
-        ontouchstart={(e) => { if (!editing) { dragArmed = true; } }}
+        draggable={!editing}
+        ondragstart={onDragStart}
+        ondragend={onDragEnd}
       >☰
       </span>
       <span class="disclosure">{#if todo.description}<Icon name="chevron" size={14} />{/if}</span>
