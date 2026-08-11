@@ -122,7 +122,7 @@
 <!-- Transparent full-screen layer captures outside clicks to dismiss. -->
 <button class="backdrop" aria-label="Close" onclick={() => onClose?.()}></button>
 
-<div class="modal" role="dialog" aria-label="Manage priorities" onkeydown={onKeydown}>
+<div class="modal" role="dialog" aria-label="Manage priorities" tabindex="-1" use:focus onkeydown={onKeydown}>
   <div class="modal-header">
     <h2><Icon name="flag" size={18} /> Priorities</h2>
     <button class="ghost close-btn" onclick={() => onClose?.()} aria-label="Close">
@@ -142,7 +142,7 @@
   </form>
 
   <div class="hint">
-    Drag to reorder. The order controls <code>sort:priority</code>. Type <code>!name</code> when adding a todo to set a priority.
+    Drag to reorder. The order controls <code>sort:priority</code>. Type <code>@name</code> when adding a todo to set a priority.
   </div>
 
   {#if predefined.length}
