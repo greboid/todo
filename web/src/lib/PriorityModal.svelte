@@ -7,18 +7,10 @@
 
   let newName = $state('');
   let editingColor = $state(null);
-  let dragName = $state(null);
-  let dragOverName = $state(null);
 
-  // Local working copy of the ordered priority names for drag reordering.
-  // We only manage predefined priorities (those with a position); ad-hoc
-  // priorities (without a position) are shown read-only at the bottom.
   let orderedNames = $state([]);
 
-  // Re-sync the local copy whenever the store updates (e.g. after colour
-  // change or add/remove).
   $effect(() => {
-    // Reading store.priorities makes this reactive.
     orderedNames = store.priorities.filter((p) => p.position != null).map((p) => p.name);
   });
 
@@ -35,35 +27,6 @@
     const [item] = arr.splice(from, 1);
     arr.splice(to, 0, item);
     orderedNames = arr;
-  }
-
-  function onDragStart(e, name) {
-    dragName = name;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', name);
-  }
-
-  function onDragOver(e, name) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    dragOverName = name;
-  }
-
-  function onDrop(e, targetName) {
-    e.preventDefault();
-    e.stopPropagation();
-    dragOverName = null;
-    if (!dragName || dragName === targetName) return;
-    const from = orderedNames.indexOf(dragName);
-    const to = orderedNames.indexOf(targetName);
-    if (from < 0 || to < 0) return;
-    moveItem(from, to);
-    dragName = null;
-  }
-
-  function onDragEnd() {
-    dragName = null;
-    dragOverName = null;
   }
 
   async function saveOrder() {
@@ -142,23 +105,13 @@
   </form>
 
   <div class="hint">
-    Drag to reorder. The order controls <code>sort:priority</code>. Type <code>@name</code> when adding a todo to set a priority.
+    Use the arrows to reorder. The order controls <code>sort:priority</code>. Type <code>@name</code> when adding a todo to set a priority.
   </div>
 
   {#if predefined.length}
     <ul class="priority-list">
       {#each predefined as p, i (p.name)}
-        <li
-          class="priority-row"
-          class:drag-over={dragOverName === p.name}
-          class:dragging={dragName === p.name}
-          draggable="true"
-          ondragstart={(e) => onDragStart(e, p.name)}
-          ondragover={(e) => onDragOver(e, p.name)}
-          ondrop={(e) => onDrop(e, p.name)}
-          ondragend={onDragEnd}
-        >
-          <span class="drag-handle" title="Drag to reorder">☰</span>
+        <li class="priority-row">
           <span class="priority-index">{i + 1}</span>
           <span class="priority-name">
             <span class="color-dot" style:background={labelColor(p.name, p.color)}></span>
@@ -336,24 +289,10 @@
     padding: 6px 8px;
     gap: 8px;
     flex-wrap: wrap;
-    cursor: grab;
     transition: background 0.1s;
   }
   .priority-row + .priority-row {
     border-top: 1px solid var(--line);
-  }
-  .priority-row.drag-over {
-    background: var(--drop);
-  }
-  .priority-row.dragging {
-    opacity: 0.4;
-  }
-  .drag-handle {
-    color: var(--muted);
-    font-size: 14px;
-    cursor: grab;
-    user-select: none;
-    flex-shrink: 0;
   }
   .priority-index {
     font-size: 12px;
