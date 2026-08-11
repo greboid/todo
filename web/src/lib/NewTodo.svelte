@@ -1,10 +1,12 @@
 <script>
   import { focus } from './actions.js';
   import { api } from './api.js';
+  import { store } from './store.svelte.js';
 
   let { placeholder = 'Add a todo…', onAdd, onCancel } = $props();
 
   let text = $state('');
+  let inputEl = $state(null);
 
   // The whole quick-add grammar (labels via #tag, trailing due/recurrence)
   // lives server-side behind POST /api/schedule/extract. The UI is a thin
@@ -39,6 +41,80 @@
   });
   let canSubmit = $derived(text.trim().length > 0);
 
+  // -- Label tab completion with popup --
+  // After typing "#" and some characters, a dropdown lists matching labels.
+  // Tab / ArrowDown cycles forward, Shift+Tab / ArrowUp cycles back; Enter or
+  // click commits the highlighted match; Escape dismisses the dropdown. The
+  // completed token replaces the partial after the "#".
+  let labelState = $state({ active: false, index: 0 });
+
+  function labelMatches(query) {
+    const q = query.toLowerCase();
+    const names = (store.labels ?? []).map((l) => l.name);
+    const seen = new Set();
+    const out = [];
+    for (const n of names) {
+      if (seen.has(n)) continue;
+      seen.add(n);
+      if (n.toLowerCase().startsWith(q)) out.push(n);
+    }
+    out.sort((a, b) => a.localeCompare(b));
+    return out;
+  }
+
+  // Inspect the current caret position for a "#partial" token being typed.
+  // Returns { start, end, partial } where [start,end) covers the word chars
+  // after the "#", or null when not inside a label token.
+  function currentToken(el) {
+    if (!el) return null;
+    const pos = el.selectionStart;
+    if (pos !== el.selectionEnd) return null;
+    const before = text.slice(0, pos);
+    const m = /(?:^|\s)#([\w-]*)$/.exec(before);
+    if (!m) return null;
+    const partial = m[1];
+    const start = m.index + (m[0].length - partial.length);
+    return { start, end: pos, partial };
+  }
+
+  let suggestions = $derived.by(() => {
+    const tok = currentToken(inputEl);
+    if (!tok || !labelState.active) return [];
+    return labelMatches(tok.partial);
+  });
+
+  function openDropdown() {
+    labelState = { active: true, index: 0 };
+  }
+  function closeDropdown() {
+    labelState = { active: false, index: 0 };
+  }
+
+  function commitMatch(name) {
+    const el = inputEl;
+    const tok = currentToken(el);
+    if (!tok) return false;
+    const after = text.slice(tok.end);
+    text = text.slice(0, tok.start) + name + ' ' + after;
+    const caret = tok.start + name.length + 1;
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+    closeDropdown();
+    return true;
+  }
+
+  function cycle(dir) {
+    const n = suggestions.length;
+    if (!n) return;
+    labelState = { active: true, index: (labelState.index + dir + n) % n };
+  }
+
+  function onInput() {
+    openDropdown();
+  }
+
   async function submit(e) {
     e.preventDefault();
     const v = text.trim();
@@ -53,21 +129,89 @@
       await onAdd?.(payload);
       text = '';
       preview = null;
+      closeDropdown();
     } catch {
       /* leave the text so the user can retry */
     }
   }
 
-  function cancel(e) {
+  function onKeydown(e) {
+    const tok = currentToken(inputEl);
+    const inToken = !!tok && labelState.active;
+    const hasSug = suggestions.length > 0;
+
     if (e.key === 'Escape') {
+      if (labelState.active) {
+        closeDropdown();
+        e.preventDefault();
+        return;
+      }
       text = '';
       onCancel ? onCancel() : e.target.blur();
+      return;
     }
+
+    if (inToken && hasSug) {
+      if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        cycle(e.shiftKey ? -1 : 1);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        cycle(1);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        cycle(-1);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === 'Enter') {
+        commitMatch(suggestions[labelState.index]);
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Open the dropdown when "#" is typed.
+    if (e.key === '#' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      requestAnimationFrame(openDropdown);
+    }
+  }
+
+  function onSuggestionClick(name) {
+    commitMatch(name);
   }
 </script>
 
 <form class="row" onsubmit={submit}>
-  <input type="text" bind:value={text} {placeholder} onkeydown={cancel} use:focus />
+  <div class="field">
+    <input
+      type="text"
+      bind:this={inputEl}
+      bind:value={text}
+      {placeholder}
+      onkeydown={onKeydown}
+      oninput={onInput}
+      onblur={() => setTimeout(closeDropdown, 120)}
+      use:focus
+    />
+    {#if suggestions.length}
+      <ul class="popup" role="listbox">
+        {#each suggestions as name, i (name)}
+          <li
+            role="option"
+            class:active={i === labelState.index}
+            onmousedown={(e) => { e.preventDefault(); onSuggestionClick(name); }}
+            onmouseenter={() => (labelState = { ...labelState, index: i })}
+          >
+            <span class="hash">#</span>{name}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
   <button type="submit" class="primary" disabled={!canSubmit}>Add</button>
   {#if feedback}
     <span class="preview">{feedback}</span>
@@ -80,6 +224,44 @@
     gap: 8px;
     padding: 12px 20px;
     align-items: center;
+  }
+  .field {
+    position: relative;
+    flex: 1;
+  }
+  .popup {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    z-index: 50;
+    margin: 2px 0 0;
+    padding: 4px;
+    list-style: none;
+    background: var(--bg, #fff);
+    border: 1px solid var(--border, #ddd);
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+    max-height: 220px;
+    overflow-y: auto;
+    min-width: 140px;
+    font-size: 13px;
+  }
+  .popup li {
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .popup li.active {
+    background: var(--accent, #3b82f6);
+    color: #fff;
+  }
+  .popup li .hash {
+    opacity: 0.6;
+    margin-right: 2px;
+  }
+  .popup li.active .hash {
+    opacity: 0.8;
   }
   .preview {
     font-size: 12px;
