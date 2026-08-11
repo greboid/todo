@@ -19,6 +19,7 @@
   let boardModalOpen = $state(false);
 
   onMount(() => {
+    store.readURL();
     store.load();
   });
 
