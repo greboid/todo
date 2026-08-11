@@ -453,10 +453,10 @@ paths:
       summary: Split quick-add text into title and optional schedule
       description: >
         Splits a quick-add string into a title, any `#label` tags, an optional
-        `!priority`, and an optional trailing due date / recurrence. `#label`
-        tokens and `!priority` tokens (single words) are pulled out; the rest is
+        `@priority`, and an optional trailing due date / recurrence. `#label`
+        tokens and `@priority` tokens (single words) are pulled out; the rest is
         split so the schedule is the longest trailing run that parses (e.g.
-        `Buy milk #errands !high tomorrow` → title "Buy milk", label "errands",
+        `Buy milk #errands @high tomorrow` → title "Buy milk", label "errands",
         priority "high", due tomorrow; `Pay rent every month on the 1st` → title
         "Pay rent", monthly recurrence). Send the client's local `today`
         (YYYY-MM-DD) so relative dates resolve from the user's perspective.
@@ -910,7 +910,7 @@ components:
           description: "Parsed #label names (without the leading #); empty when none."
         priority:
           type: string
-          description: "Parsed !priority name (without the leading !); absent when none."
+          description: "Parsed @priority name (without the leading @); absent when none."
         dueDate:
           type: string
           description: "YYYY-MM-DD of the trailing schedule; absent when none."

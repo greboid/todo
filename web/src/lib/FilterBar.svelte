@@ -170,6 +170,8 @@
         <dd>negate <code>label</code>, <code>priority</code>, <code>date</code>, or <code>has</code></dd>
         <dt><em>text</em></dt>
         <dd>search title + description</dd>
+        <dt><code>#<em>label</em></code> <code>@<em>priority</em></code></dt>
+        <dd>quick-add tags in the new-todo field (e.g. <code>Buy milk #errands @high tomorrow</code>)</dd>
       </dl>
       <p class="hint">Default <code>!has:complete</code> hides completed. Invalid tokens show an error.</p>
     </div>

@@ -46,7 +46,7 @@
 <!-- Transparent full-screen layer captures outside clicks to dismiss. -->
 <button class="backdrop" aria-label="Close" onclick={() => onClose?.()}></button>
 
-<div class="modal" role="dialog" aria-label="Manage labels" onkeydown={onKeydown}>
+<div class="modal" role="dialog" aria-label="Manage labels" tabindex="-1" use:focus onkeydown={onKeydown}>
   <div class="modal-header">
     <h2><Icon name="tag" size={18} /> Labels</h2>
     <button class="ghost close-btn" onclick={() => onClose?.()} aria-label="Close">
@@ -174,11 +174,6 @@
     font-size: 12px;
     color: var(--muted);
     margin: 0;
-  }
-  .hint code {
-    background: var(--raised);
-    border-radius: 3px;
-    padding: 0 3px;
   }
   .label-list {
     display: flex;

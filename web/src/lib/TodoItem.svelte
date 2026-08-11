@@ -481,15 +481,7 @@
       </div>
     </form>
   {:else}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <div
-      class="head"
-      role="group"
-      onclick={onHeadClick}
-      ondblclick={onHeadDblClick}
-    >
+    <div class="head" role="group">
       <span
         class="drag-handle"
         role="button"
@@ -501,12 +493,24 @@
         ondragend={onDragEnd}
       >☰
       </span>
-      <span class="disclosure">{#if todo.description}<Icon name="chevron" size={14} />{/if}</span>
+      {#if todo.description}
+        <button
+          type="button"
+          class="disclosure"
+          aria-label={expanded ? 'Collapse description' : 'Expand description'}
+          aria-expanded={expanded}
+          onclick={() => (expanded = !expanded)}
+        ><Icon name="chevron" size={14} /></button>
+      {:else}
+        <span class="disclosure-placeholder"></span>
+      {/if}
       <input type="checkbox" checked={todo.completed} onchange={toggleCompleted} />
       <span
         class="title"
         role="button"
         tabindex="0"
+        onclick={onHeadClick}
+        ondblclick={onHeadDblClick}
         onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); startEdit(); } }}
       >{todo.title}</span>
       {#if todo.labels?.length}
@@ -751,8 +755,19 @@
     justify-content: center;
     flex-shrink: 0;
     width: 14px;
+    height: 14px;
+    padding: 0;
+    border: none;
+    background: transparent;
     color: var(--muted);
     transition: transform 0.15s ease;
+    cursor: pointer;
+  }
+  .disclosure-placeholder {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
   }
   .drag-handle {
     display: inline-flex;

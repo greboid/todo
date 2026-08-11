@@ -37,7 +37,7 @@
     if (!v || !preview || preview.src !== v) return null;
     const parts = [];
     if (preview.labels?.length) parts.push(preview.labels.map((l) => `#${l}`).join(' '));
-    if (preview.priority) parts.push(`!${preview.priority}`);
+    if (preview.priority) parts.push(`@${preview.priority}`);
     if (preview.scheduleText) parts.push(`→ ${preview.scheduleText}`);
     return parts.length ? parts.join('   ') : null;
   });
@@ -81,7 +81,7 @@
     const pos = el.selectionStart;
     if (pos !== el.selectionEnd) return null;
     const before = text.slice(0, pos);
-    const m = /(?:^|\s)([#!])([\w-]*)$/.exec(before);
+    const m = /(?:^|\s)([#@])([\w-]*)$/.exec(before);
     if (!m) return null;
     const prefix = m[1];
     const partial = m[2];
@@ -92,7 +92,7 @@
   let suggestions = $derived.by(() => {
     const tok = currentToken(inputEl);
     if (!tok || !labelState.active) return [];
-    return tok.prefix === '!' ? priorityMatches(tok.partial) : labelMatches(tok.partial);
+    return tok.prefix === '@' ? priorityMatches(tok.partial) : labelMatches(tok.partial);
   });
 
   function openDropdown() {
@@ -188,7 +188,7 @@
     }
 
     // Open the dropdown when "#" or "!" is typed.
-    if ((e.key === '#' || e.key === '!') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if ((e.key === '#' || e.key === '@') && !e.ctrlKey && !e.metaKey && !e.altKey) {
       requestAnimationFrame(openDropdown);
     }
   }
