@@ -99,6 +99,17 @@ func TestApply(t *testing.T) {
 		// parse errors are surfaced, not dropped
 		{"bad date", "date:foo", nil, true},
 		{"bad has", "has:banana", nil, true},
+		// multiple date filters are now an error rather than silently overwriting
+		{"two dates", "date:today date:tomorrow", nil, true},
+
+		// date OR / AND expressions inside a single date: qualifier
+		{"date or", "date:\"overdue or today\"", []int64{3, 4}, false},
+		{"date and", "date:\"today and week\"", []int64{3}, false},
+		// "overdue and week" is empty because the overdue item (08-05) predates
+		// this-week scope; combined with "today" via OR it surfaces both.
+		{"date or and", "date:\"today and week or overdue\"", []int64{3, 4}, false},
+		// OR of two mutually-exclusive presets hits both days.
+		{"date today or tomorrow", "date:\"today or tomorrow\"", []int64{3}, false},
 
 		// empty query returns everything
 		{"empty", "", []int64{1, 2, 3, 4, 5, 6, 7, 8}, false},

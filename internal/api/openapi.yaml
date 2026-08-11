@@ -464,7 +464,9 @@ components:
         `date:<value>`, `has:<complete|label|priority|recur|date>`, and bare
         search text. Prepend `!` to label/priority/date/has for negation. Date
         values: week, overdue, none, today, tomorrow, YYYY-MM-DD, or
-        YYYY-MM-DD..YYYY-MM-DD. Invalid values yield 400.
+        YYYY-MM-DD..YYYY-MM-DD. Combine presets in one value with `or`/`and`,
+        e.g. `date:"overdue or today"` (`and` binds tighter than `or`); only
+        one `date:` qualifier per query. Invalid values yield 400.
 
 
         Sorting: add `sort:<priority|label|date>` to reorder sibling groups.
