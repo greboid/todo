@@ -8,12 +8,21 @@
   import { focus } from './actions.js';
   import { api } from './api.js';
 
-  marked.setOptions({ gfm: true, breaks: true });
+  marked.setOptions({
+    gfm: true,
+    breaks: true,
+    renderer: {
+      link({ href, tokens }) {
+        const text = this.parser.parseInline(tokens);
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      },
+    },
+  });
   function renderDescription(md) {
     const raw = marked.parse(md ?? '', { async: false });
     return DOMPurify.sanitize(raw, {
       ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote', 'a', 'hr'],
-      ALLOWED_ATTR: ['href'],
+      ALLOWED_ATTR: ['href', 'target', 'rel'],
       ALLOW_DATA_ATTR: false,
     });
   }
