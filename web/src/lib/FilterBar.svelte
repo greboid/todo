@@ -31,7 +31,7 @@
   />
   {#if activeSorts(store.filterText).length > 0}
     <div class="sort-chips" role="group" aria-label="Active sorts">
-      {#each activeSorts(store.filterText) as s (s.raw + i)}
+      {#each activeSorts(store.filterText) as s, i (s.raw + i)}
         <span class="chip" title={`${s.field} (${s.desc ? 'desc' : 'asc'})`}>
           <Icon name={s.field === 'priority' ? 'flag' : s.field === 'label' ? 'tag' : 'calendar'} size={11} />
           <span class="chip-label">{s.field}</span>
