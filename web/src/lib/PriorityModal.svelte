@@ -32,6 +32,7 @@
   async function saveOrder() {
     try {
       await store.reorderPriorities(orderedNames);
+      onClose?.();
     } catch (e) {
       alert(e.message || String(e));
     }
