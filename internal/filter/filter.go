@@ -49,7 +49,7 @@ type Query struct {
 	notLabels     []string // each excludes (AND semantics)
 	priorities    []string // positive priority match (OR semantics)
 	notPriorities []string // each excludes (AND semantics)
-	date          *dateSpec
+	date          *dateExpr
 	dateNeg       bool
 	has           map[string]bool // keys: complete, label, recur, date, priority
 	sorts         []SortKey       // ordered sort criteria; empty = unchanged order
@@ -62,9 +62,38 @@ func (q Query) Empty() bool {
 		q.date == nil && len(q.has) == 0
 }
 
+// dateSpec is a single date predicate atom: one of the named presets or a
+// custom [from,to] range.
 type dateSpec struct {
 	mode     string // week, overdue, nodate, today, tomorrow, custom
 	from, to string // custom range bounds (inclusive)
+}
+
+// dateExpr holds a boolean combination of [dateSpec] atoms parsed from a single
+// date: qualifier. It is a disjunction of conjunctions (OR of AND groups) so
+// "a or b and c" evaluates as "a or (b and c)" with standard precedence. A
+// single atom is stored as one conjunction of one term, preserving the
+// pre-existing behavior for simple filters.
+type dateExpr struct {
+	orGroups [][]dateSpec
+}
+
+// eval reports whether the item satisfies the expression: true when any OR
+// group is satisfied (and within a group, every AND term holds).
+func (e *dateExpr) eval(it Item, today, weekEnd string) bool {
+	for _, group := range e.orGroups {
+		match := true
+		for _, d := range group {
+			if !testDate(it, d, today, weekEnd) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 // qualifierRe splits the query into [!]key:value tokens and bare text. Groups:
@@ -114,9 +143,12 @@ func Parse(input string) (Query, error) {
 					q.priorities = append(q.priorities, val)
 				}
 			case "date", "d":
-				d, ok := parseDate(val)
-				if !ok {
-					return Query{}, fmt.Errorf("invalid date filter %q: try week, overdue, none, today, tomorrow, YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD", val)
+				if q.date != nil {
+					return Query{}, fmt.Errorf("multiple date filters: only one date: qualifier is allowed (combine presets with or/and inside the value, e.g. date:\"overdue or today\")")
+				}
+				d, err := parseDateExpr(val)
+				if err != nil {
+					return Query{}, err
 				}
 				q.date = &d
 				q.dateNeg = neg
@@ -186,6 +218,63 @@ func parseDate(v string) (dateSpec, bool) {
 	}
 }
 
+// parseDateExpr parses a date: qualifier value into a [dateExpr]. The value may
+// be a single preset/range ("today", "2026-08-01..2026-08-31") or a boolean
+// combination of them using "or" and "and" as separators, e.g.
+// "overdue or today", "today and week". "and" binds tighter than "or" giving
+// standard precedence: "a or b and c" == "a or (b and c)". Bare tokens without
+// an operator are treated as a single conjunction, preserving the legacy
+// single-predicate behavior.
+func parseDateExpr(v string) (dateExpr, error) {
+	tokens := splitDateTokens(v)
+	var orGroups [][]dateSpec
+	var group []dateSpec
+	flush := func() {
+		if len(group) > 0 {
+			orGroups = append(orGroups, group)
+			group = nil
+		}
+	}
+	for _, tok := range tokens {
+		switch tok {
+		case "or":
+			flush()
+		case "and":
+			// AND separates terms within the current conjunction; nothing to do.
+			continue
+		default:
+			d, ok := parseDate(tok)
+			if !ok {
+				return dateExpr{}, fmt.Errorf("invalid date filter %q: try week, overdue, none, today, tomorrow, YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD (combine with or/and)", tok)
+			}
+			group = append(group, d)
+		}
+	}
+	flush()
+	if len(orGroups) == 0 {
+		return dateExpr{}, fmt.Errorf("invalid date filter %q: try week, overdue, none, today, tomorrow, YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD", v)
+	}
+	return dateExpr{orGroups: orGroups}, nil
+}
+
+// splitDateTokens splits a date expression value into lowercase tokens,
+// treating "or", "and" (and the symbolic aliases "||", "&&", "&", "|") as
+// standalone operator tokens. Whitespace is the delimiter; adjacent operators
+// without surrounding spaces are also separated so "today||today" works.
+func splitDateTokens(v string) []string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.ReplaceAll(v, "||", " or ")
+	v = strings.ReplaceAll(v, "&&", " and ")
+	v = strings.ReplaceAll(v, "|", " or ")
+	v = strings.ReplaceAll(v, "&", " and ")
+	fields := strings.Fields(v)
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		out = append(out, f)
+	}
+	return out
+}
+
 // addDays returns the ISO date n days after iso, computed from calendar
 // components to avoid timezone drift.
 func addDays(iso string, n int) string {
@@ -249,7 +338,7 @@ func (q Query) Match(it Item, today, weekEnd string) bool {
 		return false
 	}
 	if q.date != nil {
-		ok := testDate(it, *q.date, today, weekEnd)
+		ok := q.date.eval(it, today, weekEnd)
 		if (q.dateNeg && ok) || (!q.dateNeg && !ok) {
 			return false
 		}

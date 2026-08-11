@@ -155,7 +155,9 @@
         <dt><code>date:<em>v</em></code></dt>
         <dd>
           due date: <code>week</code>, <code>overdue</code>, <code>none</code>, <code>today</code>,
-          <code>tomorrow</code>, <code>YYYY-MM-DD</code>, or a <code>YYYY-MM-DD..YYYY-MM-DD</code> range
+          <code>tomorrow</code>, <code>YYYY-MM-DD</code>, or a <code>YYYY-MM-DD..YYYY-MM-DD</code> range.
+          Combine presets with <code>or</code>/<code>and</code> in one value, e.g.
+          <code>date:"overdue or today"</code>. Only one <code>date:</code> per query.
         </dd>
         <dt><code>has:<em>x</em></code></dt>
         <dd>existence: <code>complete</code>, <code>label</code>, <code>priority</code>, <code>recur</code>, <code>date</code></dd>
