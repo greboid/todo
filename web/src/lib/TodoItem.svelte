@@ -120,6 +120,10 @@
     startEdit();
   }
 
+  function dblclickAction(node) {
+    node.addEventListener('dblclick', onHeadDblClick);
+  }
+
   function startEdit() {
     if (editing) return;
     // Seed drafts first so they're ready when beginEdit flips editingId.
@@ -481,7 +485,7 @@
       </div>
     </form>
   {:else}
-    <div class="head" role="group">
+    <div class="head" role="group" use:dblclickAction>
       <span
         class="drag-handle"
         role="button"
@@ -510,7 +514,6 @@
         role="button"
         tabindex="0"
         onclick={onHeadClick}
-        ondblclick={onHeadDblClick}
         onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); startEdit(); } }}
       >{todo.title}</span>
       {#if todo.labels?.length}
@@ -549,7 +552,7 @@
       </span>
     </div>
     {#if expanded && todo.description}
-      <div class="detail">{@html renderDescription(todo.description)}</div>
+      <div class="detail" use:dblclickAction>{@html renderDescription(todo.description)}</div>
     {/if}
   {/if}
 
