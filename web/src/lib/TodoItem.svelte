@@ -39,6 +39,10 @@
   // "into"). Used to render an insertion indicator.
   let dropZone = $state(null);
   let dragOverSelf = $state(false);
+  // Dragging is initiated only from the drag handle (left side). mousedown on
+  // the handle arms the row; the row is draggable only while armed so clicks
+  // and text selection elsewhere don't start a drag.
+  let dragArmed = $state(false);
 
   // Shake animation: plays on this item when it refuses to yield its edit slot.
   let lastRejection = $state(0);
@@ -319,6 +323,11 @@
     // re-fire this handler with the ancestor's `todo`, overwriting the dragged
     // id. Stop propagation so only the dragged element's own handler runs.
     e.stopPropagation();
+    if (!dragArmed) {
+      // Drag wasn't started from the handle: cancel it.
+      e.preventDefault();
+      return;
+    }
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/x-todo-id', String(todo.id));
     // Stop the row from being treated as its own drop target while dragging.
@@ -326,6 +335,7 @@
   }
 
   function onDragEnd() {
+    dragArmed = false;
     dragOverSelf = false;
     dropZone = null;
   }
@@ -395,7 +405,7 @@
 <div
   bind:this={rootEl}
   class={classes}
-  draggable={!editing}
+  draggable={dragArmed && !editing}
   role="treeitem"
   tabindex="0"
   aria-selected={todo.completed}
@@ -439,6 +449,16 @@
       onclick={onHeadClick}
       ondblclick={onHeadDblClick}
     >
+      <span
+        class="drag-handle"
+        role="button"
+        tabindex="-1"
+        aria-label="Drag to reorder"
+        title="Drag to reorder"
+        onmousedown={(e) => { if (!editing) { dragArmed = true; } }}
+        ontouchstart={(e) => { if (!editing) { dragArmed = true; } }}
+      >☰
+      </span>
       <span class="disclosure">{#if todo.description}<Icon name="chevron" size={14} />{/if}</span>
       <input type="checkbox" checked={todo.completed} onchange={toggleCompleted} />
       <span
@@ -812,6 +832,26 @@
     width: 14px;
     color: var(--muted);
     transition: transform 0.15s ease;
+  }
+  .drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 16px;
+    cursor: grab;
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1;
+    opacity: 0.5;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .head:hover .drag-handle {
+    opacity: 1;
+  }
+  .drag-handle:active {
+    cursor: grabbing;
   }
   .item.expanded > .head > .disclosure {
     transform: rotate(90deg);
