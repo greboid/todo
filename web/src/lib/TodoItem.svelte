@@ -541,9 +541,6 @@
         <span class="badge recur" title={todo.recurrenceLabel}><Icon name="repeat" size={12} /> {todo.recurrence.fromCompletion ? 'every!' : 'every'} {todo.recurrenceLabel}</span>
       {/if}
       <span class="actions">
-        <button class="ghost complete-btn" onclick={toggleCompleted} aria-label={todo.completed ? 'Mark incomplete' : 'Mark complete'}>
-          <Icon name={todo.completed ? 'undo' : 'check'} size={16} />
-        </button>
         <button class="ghost" onclick={startEdit} aria-label="Edit"><Icon name="edit" size={16} /></button>
         <button class="ghost" onclick={openLabelPicker} aria-label="Labels"><Icon name="tag" size={16} /></button>
         <button class="ghost" onclick={openPriorityPicker} aria-label="Priority"><Icon name="flag" size={16} /></button>
@@ -846,10 +843,6 @@
   .danger:hover {
     color: var(--danger);
     border-color: var(--danger);
-  }
-  .done .complete-btn {
-    color: var(--accent-strong);
-    border-color: var(--accent);
   }
   .edit {
     display: flex;
