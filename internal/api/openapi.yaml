@@ -40,9 +40,11 @@ paths:
 
         With `filter`, matching is performed server-side (see the filter grammar
         in internal/filter): the response contains only matching todos plus the
-        ancestors that keep the tree connected. `today` (YYYY-MM-DD) anchors the
-        date presets (today/tomorrow/week) to the user's local date. A malformed
-        filter returns 400.
+        ancestors that keep the tree connected. The same query accepts
+        `sort:<field>` terms that reorder the matching todos within each
+        sibling group. `today` (YYYY-MM-DD) anchors the date presets
+        (today/tomorrow/week) to the user's local date. A malformed filter
+        returns 400.
       parameters:
         - $ref: "#/components/parameters/BoardIdQuery"
         - $ref: "#/components/parameters/FilterQuery"
@@ -463,7 +465,15 @@ components:
         search text. Prepend `!` to label/priority/date/has for negation. Date
         values: week, overdue, none, today, tomorrow, YYYY-MM-DD, or
         YYYY-MM-DD..YYYY-MM-DD. Invalid values yield 400.
-      schema: { type: string, example: "!has:complete label:work" }
+
+
+        Sorting: add `sort:<priority|label|date>` to reorder sibling groups.
+        Repeat for tiebreakers (first key wins, subsequent break ties); prefix
+        `!` to reverse, e.g. `sort:!priority`. Todos missing the sorted
+        attribute land last under ascending order. Sort applies after
+        filtering and only reorders within a parent — the tree structure is
+        preserved.
+      schema: { type: string, example: "!has:complete sort:priority sort:date" }
     TodayQuery:
       name: today
       in: query
@@ -587,7 +597,10 @@ components:
           type: integer
           format: int64
           nullable: true
-          description: Target board. If omitted, the current/default board is used.
+          description: >
+            Target board. Required for top-level todos (rejected with 400
+            otherwise). Optional when `parentId` is set — the new subtask
+            inherits its parent's board.
         title: { type: string }
         description: { type: string }
         parentId:
@@ -822,7 +835,7 @@ components:
 
     ScheduleParseResponse:
       type: object
-      required: [ok, dueDate, scheduleText]
+      required: [ok, dueDate, scheduleText, recurrence]
       properties:
         ok:
           type: boolean
@@ -833,7 +846,8 @@ components:
         recurrence:
           allOf:
             - $ref: "#/components/schemas/Recurrence"
-          description: Parsed recurrence; absent means non-recurring.
+          nullable: true
+          description: Parsed recurrence; null means non-recurring.
         scheduleText:
           type: string
           description: Canonical free-text rendering of the parsed schedule.

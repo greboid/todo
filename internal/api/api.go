@@ -109,6 +109,7 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/boards", h.createBoard)
 	mux.HandleFunc("GET /api/boards/{id}", h.getBoard)
 	mux.HandleFunc("PATCH /api/boards/{id}", h.updateBoard)
+	mux.HandleFunc("DELETE /api/boards/{id}", h.deleteBoard)
 	// API docs: embedded OpenAPI spec and a self-hosted Swagger UI.
 	mux.HandleFunc("GET /api/openapi.yaml", h.openapiSpec)
 	mux.HandleFunc("GET /api/swagger/", h.swaggerUI)
