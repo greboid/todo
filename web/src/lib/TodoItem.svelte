@@ -1,10 +1,22 @@
 <script>
   import { store, labelColor, LABEL_PALETTE } from './store.svelte.js';
+  import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
   import NewTodo from './NewTodo.svelte';
   import Icon from './Icon.svelte';
   import Self from './TodoItem.svelte';
   import { focus } from './actions.js';
   import { api } from './api.js';
+
+  marked.setOptions({ gfm: true, breaks: true });
+  function renderDescription(md) {
+    const raw = marked.parse(md ?? '', { async: false });
+    return DOMPurify.sanitize(raw, {
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote', 'a', 'hr'],
+      ALLOWED_ATTR: ['href'],
+      ALLOW_DATA_ATTR: false,
+    });
+  }
 
   let { todo } = $props();
   // editing is driven by the global single-edit slot in the store.
@@ -506,7 +518,7 @@
       </span>
     </div>
     {#if expanded && todo.description}
-      <div class="detail">{todo.description}</div>
+      <div class="detail">{@html renderDescription(todo.description)}</div>
     {/if}
   {/if}
 
@@ -821,8 +833,45 @@
   .detail {
     color: var(--muted);
     margin: 6px 0 2px;
-    white-space: pre-wrap;
     word-break: break-word;
+  }
+  .detail :global(a) {
+    color: inherit;
+    text-decoration: underline;
+  }
+  .detail :global(code) {
+    font-family: ui-monospace, monospace;
+    background: var(--bg-elevated, rgba(0, 0, 0, 0.05));
+    border-radius: 3px;
+    padding: 0 4px;
+  }
+  .detail :global(pre) {
+    margin: 6px 0;
+    padding: 8px;
+    overflow-x: auto;
+  }
+  .detail :global(pre code) {
+    background: none;
+    padding: 0;
+  }
+  .detail :global(ul),
+  .detail :global(ol) {
+    margin: 6px 0;
+    padding-left: 1.4em;
+  }
+  .detail :global(blockquote) {
+    margin: 6px 0;
+    padding-left: 0.8em;
+    border-left: 3px solid var(--border, rgba(0, 0, 0, 0.1));
+  }
+  .detail :global(p) {
+    margin: 4px 0;
+  }
+  .detail > :global(*:first-child) {
+    margin-top: 0;
+  }
+  .detail > :global(*:last-child) {
+    margin-bottom: 0;
   }
   .disclosure {
     display: inline-flex;
