@@ -43,6 +43,21 @@ button {
   padding: 4px 10px;
 }
 
+button.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 56px;
+  height: 32px;
+  padding: 0;
+  line-height: 1;
+}
+.action-btn.placeholder {
+  pointer-events: none;
+  visibility: hidden;
+}
+
 button:hover {
   border-color: var(--accent);
 }

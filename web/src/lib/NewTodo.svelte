@@ -226,7 +226,7 @@
       </ul>
     {/if}
   </div>
-  <button type="submit" class="primary" disabled={!canSubmit}>Add</button>
+  <button type="submit" class="primary action-btn" disabled={!canSubmit}>Add</button>
   {#if feedback}
     <span class="preview">{feedback}</span>
   {/if}

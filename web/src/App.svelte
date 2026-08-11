@@ -4,15 +4,19 @@
   import TodoItem from './lib/TodoItem.svelte';
   import NewTodo from './lib/NewTodo.svelte';
   import BoardSwitcher from './lib/BoardSwitcher.svelte';
+  import BoardModal from './lib/BoardModal.svelte';
   import FilterBar from './lib/FilterBar.svelte';
   import Icon from './lib/Icon.svelte';
   import LabelModal from './lib/LabelModal.svelte';
   import PriorityModal from './lib/PriorityModal.svelte';
+  import HelpModal from './lib/HelpModal.svelte';
 
   const roots = $derived(store.visibleChildrenOf(null));
 
   let labelModalOpen = $state(false);
   let priorityModalOpen = $state(false);
+  let helpModalOpen = $state(false);
+  let boardModalOpen = $state(false);
 
   onMount(() => {
     store.load();
@@ -29,15 +33,23 @@
     {#if store.loading}<span class="muted">Loading…</span>{/if}
     {#if store.error}<span class="error">{store.error}</span>{/if}
     <div class="toolbar">
+      <button class="ghost tool-btn" onclick={() => (boardModalOpen = true)} title="Manage boards">
+        <Icon name="board" size={16} /><span class="tool-label">Boards</span>
+      </button>
       <button class="ghost tool-btn" onclick={() => (labelModalOpen = true)} title="Manage labels">
         <Icon name="tag" size={16} /><span class="tool-label">Labels</span>
       </button>
       <button class="ghost tool-btn" onclick={() => (priorityModalOpen = true)} title="Manage priorities">
         <Icon name="flag" size={16} /><span class="tool-label">Priorities</span>
       </button>
+      <button class="ghost tool-btn" onclick={() => (helpModalOpen = true)} title="Filter syntax help">
+        <Icon name="help" size={16} /><span class="tool-label">Help</span>
+      </button>
     </div>
   </div>
-  <BoardSwitcher />
+  {#if store.boards.length > 1}
+    <BoardSwitcher />
+  {/if}
 </header>
 
 {#if store.activeBoard}
@@ -77,11 +89,17 @@
   </ul>
 {/if}
 
+{#if boardModalOpen}
+  <BoardModal onClose={() => (boardModalOpen = false)} />
+{/if}
 {#if labelModalOpen}
   <LabelModal onClose={() => (labelModalOpen = false)} />
 {/if}
 {#if priorityModalOpen}
   <PriorityModal onClose={() => (priorityModalOpen = false)} />
+{/if}
+{#if helpModalOpen}
+  <HelpModal onClose={() => (helpModalOpen = false)} />
 {/if}
 
 <style>
