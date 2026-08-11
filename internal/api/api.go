@@ -104,6 +104,7 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/priorities", h.listPriorities)
 	mux.HandleFunc("PUT /api/priorities/{name}", h.updatePriority)
 	mux.HandleFunc("POST /api/priorities/predefined", h.addPredefinedPriority)
+	mux.HandleFunc("POST /api/priorities/reorder", h.reorderPriorities)
 	mux.HandleFunc("DELETE /api/priorities/predefined/{name}", h.removePredefinedPriority)
 	mux.HandleFunc("GET /api/boards", h.listBoards)
 	mux.HandleFunc("POST /api/boards", h.createBoard)
@@ -405,6 +406,29 @@ func (h *Handler) removePredefinedPriority(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) reorderPriorities(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Names []string `json:"names"`
+	}
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if in.Names == nil {
+		in.Names = []string{}
+	}
+	if err := h.store.ReorderPriorities(r.Context(), in.Names); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	priorities, err := h.store.ListPriorities(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, nonNil(priorities))
+}
+
 func (h *Handler) listBoards(w http.ResponseWriter, r *http.Request) {
 	boards, err := h.store.ListBoards(r.Context())
 	if err != nil {
@@ -624,11 +648,12 @@ func (h *Handler) extractSchedule(w http.ResponseWriter, r *http.Request) {
 		OK           bool               `json:"ok"`
 		Title        string             `json:"title"`
 		Labels       []string           `json:"labels"`
+		Priority     string             `json:"priority,omitempty"`
 		DueDate      string             `json:"dueDate,omitempty"`
 		Recurrence   *models.Recurrence `json:"recurrence,omitempty"`
 		ScheduleText string             `json:"scheduleText,omitempty"`
 	}
-	resp := extractResponse{OK: ok, Title: qa.Title, Labels: nonNil(qa.Labels)}
+	resp := extractResponse{OK: ok, Title: qa.Title, Labels: nonNil(qa.Labels), Priority: qa.Priority}
 	if ok && (qa.Schedule.DueDate != "" || qa.Schedule.Recurrence != nil) {
 		resp.DueDate = qa.Schedule.DueDate
 		resp.Recurrence = qa.Schedule.Recurrence

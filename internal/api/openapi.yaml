@@ -321,9 +321,11 @@ paths:
       operationId: listPriorities
       summary: List priorities
       description: >
-        The merged, de-duplicated, sorted set of predefined priorities and
-        priorities currently in use across todos. Each priority carries its
-        colour (a hex string, empty when no user-defined colour is set).
+        The merged, de-duplicated set of predefined priorities and priorities
+        currently in use across todos, ordered by the user-defined position
+        (predefined first, ad-hoc last). Each priority carries its colour (a
+        hex string, empty when no user-defined colour is set) and its position
+        (absent for ad-hoc priorities without an explicit order).
       responses:
         "200":
           description: Priority list.
@@ -376,6 +378,36 @@ paths:
               schema: { $ref: "#/components/schemas/PriorityName" }
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/priorities/reorder:
+    post:
+      tags: [Priorities]
+      operationId: reorderPriorities
+      summary: Reorder priorities
+      description: >
+        Sets the user-defined ordering of predefined priorities. The `names`
+        array is the desired order (index 0 = first/highest). Names not in the
+        predefined set are ignored. Returns the full, reordered priority list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [names]
+              properties:
+                names:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Reordered priority list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Priority" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
   /api/priorities/predefined/{name}:
     parameters:
       - $ref: "#/components/parameters/LabelNamePath"
@@ -420,14 +452,15 @@ paths:
       operationId: extractSchedule
       summary: Split quick-add text into title and optional schedule
       description: >
-        Splits a quick-add string into a title, any `#label` tags, and an
-        optional trailing due date / recurrence. `#label` tokens (single words)
-        are pulled out as labels; the rest is split so the schedule is the
-        longest trailing run that parses (e.g. `Buy milk #errands tomorrow` →
-        title "Buy milk", label "errands", due tomorrow; `Pay rent every month
-        on the 1st` → title "Pay rent", monthly recurrence). Send the client's
-        local `today` (YYYY-MM-DD) so relative dates resolve from the user's
-        perspective. Always returns 200.
+        Splits a quick-add string into a title, any `#label` tags, an optional
+        `!priority`, and an optional trailing due date / recurrence. `#label`
+        tokens and `!priority` tokens (single words) are pulled out; the rest is
+        split so the schedule is the longest trailing run that parses (e.g.
+        `Buy milk #errands !high tomorrow` → title "Buy milk", label "errands",
+        priority "high", due tomorrow; `Pay rent every month on the 1st` → title
+        "Pay rent", monthly recurrence). Send the client's local `today`
+        (YYYY-MM-DD) so relative dates resolve from the user's perspective.
+        Always returns 200.
       requestBody:
         required: true
         content:
@@ -743,6 +776,10 @@ components:
         color:
           type: string
           description: "Hex colour (e.g. #ef4444); empty means auto-assigned palette colour."
+        position:
+          type: integer
+          nullable: true
+          description: "User-defined ordering (0 = first/highest); absent for ad-hoc priorities."
 
     CreatePriority:
       type: object
@@ -866,11 +903,14 @@ components:
           description: Whether a non-empty title was produced (false for blank input or only labels).
         title:
           type: string
-          description: The title with labels and the trailing schedule removed; spacing collapsed.
+          description: The title with labels, priority, and the trailing schedule removed; spacing collapsed.
         labels:
           type: array
           items: { type: string }
           description: "Parsed #label names (without the leading #); empty when none."
+        priority:
+          type: string
+          description: "Parsed !priority name (without the leading !); absent when none."
         dueDate:
           type: string
           description: "YYYY-MM-DD of the trailing schedule; absent when none."

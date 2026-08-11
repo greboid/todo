@@ -1,5 +1,5 @@
 <script>
-  import { store, labelColor, LABEL_PALETTE } from './store.svelte.js';
+  import { store, labelColor } from './store.svelte.js';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import NewTodo from './NewTodo.svelte';
@@ -32,7 +32,8 @@
   let editing = $derived(store.editingId === todo.id);
   let draftTitle = $state('');
   let draftDesc = $state('');
-  let draftLabels = $state('');
+  let draftLabels = $state([]);
+  let draftPriority = $state('');
   let draftSchedule = $state(''); // combined free-text due+recurrence field
   let addingChild = $state(false);
   // Single-click on the row toggles a detail view (the description). A short
@@ -45,16 +46,10 @@
   let labelPickerOpen = $state(false);
   let labelQuery = $state('');
   let activeLabels = $state([]);
-  let managePredefinedOpen = $state(false);
-  let predefinedQuery = $state('');
-  let editingColorLabel = $state(null);
 
   // Inline priority picker state.
   let priorityPickerOpen = $state(false);
   let activePriority = $state('');
-  let managePriorityOpen = $state(false);
-  let priorityQuery = $state('');
-  let editingColorPriority = $state(null);
 
   // Drop target state for this row. Dragging is initiated from the drag
   // handle (which is its own draggable element); the row itself is never
@@ -130,7 +125,8 @@
     // Seed drafts first so they're ready when beginEdit flips editingId.
     draftTitle = todo.title;
     draftDesc = todo.description || '';
-    draftLabels = (todo.labels || []).join(', ');
+    draftLabels = [...(todo.labels || [])];
+    draftPriority = todo.priority || '';
     draftSchedule = todo.scheduleText || '';
     // beginEdit refuses if another todo holds a dirty edit. On refusal this
     // todo stays in view mode; the store bumped rejectionTick so the other
@@ -145,14 +141,11 @@
   }
 
   async function saveEdit() {
-    const labels = draftLabels
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
     const patch = {
       title: draftTitle.trim() || todo.title,
       description: draftDesc,
-      labels,
+      labels: [...draftLabels],
+      priority: draftPriority,
     };
     // One field drives both due date and recurrence. Empty clears both. The
     // grammar lives server-side now, so parsing goes through the API.
@@ -261,35 +254,42 @@
     labelPickerOpen = false;
   }
 
-  async function addPredefined() {
-    const name = predefinedQuery.trim();
-    if (!name) return;
-    try {
-      await store.addPredefinedLabel(name);
-      predefinedQuery = '';
-    } catch (e) {
-      alert(e.message || String(e));
-    }
-  }
-
-  async function removePredefined(name) {
-    try {
-      await store.removePredefinedLabel(name);
-    } catch (e) {
-      alert(e.message || String(e));
-    }
-  }
-
   function storedColor(name) {
     const found = store.labels.find((l) => l.name === name);
     return found ? found.color : '';
   }
 
-  async function setLabelColor(name, color) {
-    try {
-      await store.updateLabelColor(name, color);
-    } catch (e) {
-      alert(e.message || String(e));
+  // --- Edit-form label chips ---
+  let editLabelQuery = $state('');
+  const editLabelSuggestions = $derived(
+    store.labels
+      .filter((l) => !draftLabels.includes(l.name) && l.name.toLowerCase().includes(editLabelQuery.toLowerCase()))
+      .slice(0, 6),
+  );
+
+  function addEditLabel(name) {
+    name = name.trim();
+    if (!name) return;
+    if (!draftLabels.some((l) => l.toLowerCase() === name.toLowerCase())) {
+      draftLabels = [...draftLabels, name];
+    }
+    editLabelQuery = '';
+  }
+
+  function removeEditLabel(name) {
+    draftLabels = draftLabels.filter((l) => l !== name);
+  }
+
+  function onEditLabelKeydown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (editLabelSuggestions.length === 1) {
+        addEditLabel(editLabelSuggestions[0].name);
+      } else {
+        addEditLabel(editLabelQuery);
+      }
+    } else if (e.key === 'Backspace' && editLabelQuery === '' && draftLabels.length) {
+      draftLabels = draftLabels.slice(0, -1);
     }
   }
 
@@ -307,36 +307,14 @@
     priorityPickerOpen = false;
   }
 
-  async function addPriorityPredefined() {
-    const name = priorityQuery.trim();
-    if (!name) return;
-    try {
-      await store.addPredefinedPriority(name);
-      priorityQuery = '';
-    } catch (e) {
-      alert(e.message || String(e));
-    }
-  }
-
-  async function removePriorityPredefined(name) {
-    try {
-      await store.removePredefinedPriority(name);
-    } catch (e) {
-      alert(e.message || String(e));
-    }
-  }
-
   function storedPriorityColor(name) {
     const found = store.priorities.find((p) => p.name === name);
     return found ? found.color : '';
   }
 
-  async function setPriorityColor(name, color) {
-    try {
-      await store.updatePriorityColor(name, color);
-    } catch (e) {
-      alert(e.message || String(e));
-    }
+  // --- Edit-form priority selection ---
+  function toggleDraftPriority(name) {
+    draftPriority = draftPriority === name ? '' : name;
   }
 
   function onDragStart(e) {
@@ -432,7 +410,58 @@
     <form class="edit" onsubmit={(e) => { e.preventDefault(); saveEdit(); }}>
       <input type="text" bind:value={draftTitle} oninput={store.markEditDirty} onkeydown={onEditKeydown} use:focus />
       <textarea bind:value={draftDesc} rows="2" placeholder="Description" oninput={store.markEditDirty} onkeydown={onEditKeydown}></textarea>
-      <input type="text" bind:value={draftLabels} placeholder="Labels (comma separated)" oninput={store.markEditDirty} onkeydown={onEditKeydown} />
+      <div class="chip-field">
+        <div class="chips">
+          {#each draftLabels as label (label)}
+            <button
+              type="button"
+              class="chip removable"
+              style:background={labelColor(label, storedColor(label)) + '22'}
+              style:border-color={labelColor(label, storedColor(label))}
+              style:color={labelColor(label, storedColor(label))}
+              onclick={() => removeEditLabel(label)}
+            >
+              {label}<span class="x">×</span>
+            </button>
+          {/each}
+        </div>
+        <input
+          type="text"
+          bind:value={editLabelQuery}
+          placeholder={draftLabels.length ? '' : 'Labels…'}
+          oninput={store.markEditDirty}
+          onkeydown={onEditLabelKeydown}
+        />
+        {#if editLabelSuggestions.length && editLabelQuery}
+          <ul class="inline-suggestions">
+            {#each editLabelSuggestions as s (s.name)}
+              <li>
+                <button type="button" class="inline-suggestion" onclick={() => addEditLabel(s.name)}>
+                  <span class="suggestion-dot" style:background={labelColor(s.name, s.color)}></span>
+                  {s.name}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+      {#if store.priorities.length}
+        <div class="priority-chips">
+          <span class="field-label"><Icon name="flag" size={12} /></span>
+          {#each store.priorities as p (p.name)}
+            <button
+              type="button"
+              class="chip {draftPriority === p.name ? 'selected' : ''}"
+              style:background={draftPriority === p.name ? labelColor(p.name, p.color) + '22' : 'transparent'}
+              style:border-color={draftPriority === p.name ? labelColor(p.name, p.color) : 'var(--line)'}
+              style:color={draftPriority === p.name ? labelColor(p.name, p.color) : 'var(--text)'}
+              onclick={() => toggleDraftPriority(p.name)}
+            >
+              {p.name}
+            </button>
+          {/each}
+        </div>
+      {/if}
       <input
         type="text"
         class="schedule"
@@ -574,86 +603,7 @@
       <div class="row">
         <button type="button" class="primary" onclick={saveLabels}>Save</button>
         <button type="button" onclick={() => (labelPickerOpen = false)}>Cancel</button>
-        <button
-          type="button"
-          class="ghost"
-          onclick={() => (managePredefinedOpen = !managePredefinedOpen)}
-          aria-expanded={managePredefinedOpen}
-        >
-          {managePredefinedOpen ? '▾' : '▸'} Predefined
-        </button>
       </div>
-      {#if managePredefinedOpen}
-        <div class="predefined-manager">
-          <p class="hint">
-            Predefined labels always appear in the suggestion list, even if no todo uses them.
-          </p>
-          <form
-            class="label-input"
-            onsubmit={(e) => {
-              e.preventDefault();
-              addPredefined();
-            }}
-          >
-            <input
-              type="text"
-              bind:value={predefinedQuery}
-              placeholder="New predefined label…"
-              autocomplete="off"
-            />
-            <button type="submit" class="ghost">Add</button>
-          </form>
-          {#if store.labels.length}
-            <ul class="predefined-list">
-              {#each store.labels as lbl (lbl.name)}
-                <li>
-                  <span class="predefined-label-name">
-                    <span class="color-dot" style:background={labelColor(lbl.name, lbl.color)}></span>
-                    {lbl.name}
-                  </span>
-                  <span class="predefined-actions">
-                    <button
-                      type="button"
-                      class="ghost color-btn"
-                      style:background={labelColor(lbl.name, lbl.color)}
-                      onclick={() => (editingColorLabel = editingColorLabel === lbl.name ? null : lbl.name)}
-                      aria-label="Set colour for {lbl.name}"
-                    ></button>
-                    <button
-                      type="button"
-                      class="ghost danger"
-                      onclick={() => removePredefined(lbl.name)}
-                      aria-label="Remove predefined label {lbl.name}"
-                    >
-                      ×
-                    </button>
-                  </span>
-                  {#if editingColorLabel === lbl.name}
-                    <div class="color-picker">
-                      <button
-                        type="button"
-                        class="color-swatch auto"
-                        title="Auto"
-                        onclick={() => { setLabelColor(lbl.name, ''); editingColorLabel = null; }}
-                      >Auto</button>
-                      {#each LABEL_PALETTE as c (c)}
-                        <button
-                          type="button"
-                          class="color-swatch"
-                          class:selected={lbl.color === c}
-                          style:background={c}
-                          onclick={() => { setLabelColor(lbl.name, c); editingColorLabel = null; }}
-                          aria-label="Set colour to {c}"
-                        ></button>
-                      {/each}
-                    </div>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
     </div>
   {/if}
 
@@ -694,86 +644,7 @@
       <div class="row">
         <button type="button" class="primary" onclick={savePriority}>Save</button>
         <button type="button" onclick={() => (priorityPickerOpen = false)}>Cancel</button>
-        <button
-          type="button"
-          class="ghost"
-          onclick={() => (managePriorityOpen = !managePriorityOpen)}
-          aria-expanded={managePriorityOpen}
-        >
-          {managePriorityOpen ? '▾' : '▸'} Manage
-        </button>
       </div>
-      {#if managePriorityOpen}
-        <div class="predefined-manager">
-          <p class="hint">
-            Priorities are single-valued. Add or remove the predefined set shown in the picker above.
-          </p>
-          <form
-            class="label-input"
-            onsubmit={(e) => {
-              e.preventDefault();
-              addPriorityPredefined();
-            }}
-          >
-            <input
-              type="text"
-              bind:value={priorityQuery}
-              placeholder="New priority…"
-              autocomplete="off"
-            />
-            <button type="submit" class="ghost">Add</button>
-          </form>
-          {#if store.priorities.length}
-            <ul class="predefined-list">
-              {#each store.priorities as pr (pr.name)}
-                <li>
-                  <span class="predefined-label-name">
-                    <span class="color-dot" style:background={labelColor(pr.name, pr.color)}></span>
-                    {pr.name}
-                  </span>
-                  <span class="predefined-actions">
-                    <button
-                      type="button"
-                      class="ghost color-btn"
-                      style:background={labelColor(pr.name, pr.color)}
-                      onclick={() => (editingColorPriority = editingColorPriority === pr.name ? null : pr.name)}
-                      aria-label="Set colour for {pr.name}"
-                    ></button>
-                    <button
-                      type="button"
-                      class="ghost danger"
-                      onclick={() => removePriorityPredefined(pr.name)}
-                      aria-label="Remove priority {pr.name}"
-                    >
-                      ×
-                    </button>
-                  </span>
-                  {#if editingColorPriority === pr.name}
-                    <div class="color-picker">
-                      <button
-                        type="button"
-                        class="color-swatch auto"
-                        title="Auto"
-                        onclick={() => { setPriorityColor(pr.name, ''); editingColorPriority = null; }}
-                      >Auto</button>
-                      {#each LABEL_PALETTE as c (c)}
-                        <button
-                          type="button"
-                          class="color-swatch"
-                          class:selected={pr.color === c}
-                          style:background={c}
-                          onclick={() => { setPriorityColor(pr.name, c); editingColorPriority = null; }}
-                          aria-label="Set colour to {c}"
-                        ></button>
-                      {/each}
-                    </div>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
     </div>
   {/if}
 
@@ -977,6 +848,77 @@
   .schedule {
     font-size: 12px;
   }
+  .chip-field {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 4px;
+    background: var(--panel);
+  }
+  .chip-field .chips {
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .chip-field input {
+    flex: 1;
+    min-width: 80px;
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    outline: none;
+  }
+  .chip-field input:focus {
+    outline: none;
+  }
+  .inline-suggestions {
+    position: absolute;
+    margin-top: 2px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: 0 4px 14px var(--shadow);
+    z-index: 10;
+    max-height: 140px;
+    overflow: auto;
+    list-style: none;
+    padding: 2px;
+  }
+  .inline-suggestion {
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .inline-suggestion:hover {
+    background: var(--drop);
+  }
+  .priority-chips {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .priority-chips .field-label {
+    display: inline-flex;
+    align-items: center;
+    color: var(--muted);
+  }
+  .priority-chips .chip {
+    cursor: pointer;
+  }
+  .priority-chips .chip.selected {
+    font-weight: 600;
+  }
   .rc-feedback {
     font-size: 12px;
     margin: -2px 0;
@@ -1056,67 +998,6 @@
     display: flex;
     gap: 6px;
   }
-  .predefined-manager {
-    border-top: 1px solid var(--line);
-    margin-top: 6px;
-    padding-top: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .predefined-manager .hint {
-    margin: 0;
-    font-size: 12px;
-    opacity: 0.7;
-  }
-  .predefined-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    max-height: 140px;
-    overflow: auto;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-  }
-  .predefined-list li {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 2px 6px;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .predefined-list li + li {
-    border-top: 1px solid var(--line);
-  }
-  .predefined-label-name {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-  }
-  .color-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  .predefined-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .color-btn {
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    border-radius: 50%;
-    border: 2px solid var(--line);
-    cursor: pointer;
-  }
-  .color-btn:hover {
-    border-color: var(--text);
-  }
   .suggestion-dot {
     display: inline-block;
     width: 8px;
@@ -1124,35 +1005,6 @@
     border-radius: 50%;
     margin-right: 4px;
     vertical-align: middle;
-  }
-  .color-picker {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-wrap: wrap;
-    padding: 4px 6px;
-    width: 100%;
-    border-top: 1px dashed var(--line);
-  }
-  .color-swatch {
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    cursor: pointer;
-  }
-  .color-swatch.selected {
-    border-color: var(--text);
-  }
-  .color-swatch.auto {
-    width: auto;
-    padding: 0 6px;
-    border: 1px solid var(--line);
-    background: transparent;
-    color: var(--muted);
-    font-size: 10px;
-    border-radius: 999px;
   }
   .suggestion {
     display: inline-flex;

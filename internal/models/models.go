@@ -56,10 +56,12 @@ type UpdateLabel struct {
 // Priority is a priority level with its colour. Colour is a hex string (e.g.
 // "#ef4444") or empty when no user-defined colour is set (the client picks
 // from a palette deterministically by name). Unlike labels, a todo carries at
-// most one priority.
+// most one priority. Position is the user-defined ordering (0 = highest
+// precedence); priorities without an explicit position sort last.
 type Priority struct {
-	Name  string `json:"name"`
-	Color string `json:"color,omitempty"`
+	Name     string `json:"name"`
+	Color    string `json:"color,omitempty"`
+	Position *int   `json:"position,omitempty"`
 }
 
 // CreatePriority is the payload for adding a priority to the predefined set.

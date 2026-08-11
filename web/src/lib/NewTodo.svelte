@@ -29,13 +29,15 @@
     return () => clearTimeout(handle);
   });
 
-  // Feedback line: the parsed labels (#chips) and schedule arrow, shown only
-  // while it matches the current text (null while a parse is pending).
+  // Feedback line: the parsed labels (#chips), priority (!flag), and schedule
+  // arrow, shown only while it matches the current text (null while a parse
+  // is pending).
   let feedback = $derived.by(() => {
     const v = text.trim();
     if (!v || !preview || preview.src !== v) return null;
     const parts = [];
     if (preview.labels?.length) parts.push(preview.labels.map((l) => `#${l}`).join(' '));
+    if (preview.priority) parts.push(`!${preview.priority}`);
     if (preview.scheduleText) parts.push(`→ ${preview.scheduleText}`);
     return parts.length ? parts.join('   ') : null;
   });
@@ -62,25 +64,35 @@
     return out;
   }
 
-  // Inspect the current caret position for a "#partial" token being typed.
-  // Returns { start, end, partial } where [start,end) covers the word chars
-  // after the "#", or null when not inside a label token.
+  function priorityMatches(query) {
+    const q = query.toLowerCase();
+    return (store.priorities ?? [])
+      .map((p) => p.name)
+      .filter((n) => n.toLowerCase().startsWith(q))
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  // Inspect the current caret position for a "#partial" or "!partial" token
+  // being typed. Returns { start, end, partial, prefix } where [start,end)
+  // covers the word chars after the prefix marker, or null when not inside a
+  // token.
   function currentToken(el) {
     if (!el) return null;
     const pos = el.selectionStart;
     if (pos !== el.selectionEnd) return null;
     const before = text.slice(0, pos);
-    const m = /(?:^|\s)#([\w-]*)$/.exec(before);
+    const m = /(?:^|\s)([#!])([\w-]*)$/.exec(before);
     if (!m) return null;
-    const partial = m[1];
+    const prefix = m[1];
+    const partial = m[2];
     const start = m.index + (m[0].length - partial.length);
-    return { start, end: pos, partial };
+    return { start, end: pos, partial, prefix };
   }
 
   let suggestions = $derived.by(() => {
     const tok = currentToken(inputEl);
     if (!tok || !labelState.active) return [];
-    return labelMatches(tok.partial);
+    return tok.prefix === '!' ? priorityMatches(tok.partial) : labelMatches(tok.partial);
   });
 
   function openDropdown() {
@@ -124,6 +136,7 @@
       if (!res || !res.ok || !res.title) return; // no usable title: keep the text
       const payload = { title: res.title };
       if (res.labels?.length) payload.labels = res.labels;
+      if (res.priority) payload.priority = res.priority;
       if (res.dueDate) payload.dueDate = res.dueDate;
       if (res.recurrence) payload.recurrence = res.recurrence;
       await onAdd?.(payload);
@@ -174,8 +187,8 @@
       }
     }
 
-    // Open the dropdown when "#" is typed.
-    if (e.key === '#' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // Open the dropdown when "#" or "!" is typed.
+    if ((e.key === '#' || e.key === '!') && !e.ctrlKey && !e.metaKey && !e.altKey) {
       requestAnimationFrame(openDropdown);
     }
   }
@@ -202,11 +215,12 @@
         {#each suggestions as name, i (name)}
           <li
             role="option"
+            aria-selected={i === labelState.index}
             class:active={i === labelState.index}
             onmousedown={(e) => { e.preventDefault(); onSuggestionClick(name); }}
             onmouseenter={() => (labelState = { ...labelState, index: i })}
           >
-            <span class="hash">#</span>{name}
+            <span class="hash">{currentToken(inputEl)?.prefix ?? '#'}</span>{name}
           </li>
         {/each}
       </ul>

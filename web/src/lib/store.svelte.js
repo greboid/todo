@@ -404,6 +404,11 @@ function createStore() {
     await load();
   }
 
+  async function reorderPriorities(names) {
+    const updated = (await api.reorderPriorities(names)) ?? [];
+    priorities = updated;
+  }
+
   return {
     get todos() {
       return todos;
@@ -494,5 +499,6 @@ function createStore() {
     addPredefinedPriority,
     removePredefinedPriority,
     updatePriorityColor,
+    reorderPriorities,
   };
 }
