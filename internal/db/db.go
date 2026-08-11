@@ -126,6 +126,7 @@ type predefinedPriority struct {
 	bun.BaseModel `bun:"table:predefined_priorities"`
 	ID            int64  `bun:"id,pk,autoincrement"`
 	Name          string `bun:"name,notnull,unique"`
+	Position      int    `bun:"position,notnull,default:0"`
 }
 
 func (b board) toModel() models.Board {
@@ -215,11 +216,19 @@ func (d *DB) migrate(ctx context.Context) error {
 		func(ctx context.Context) error {
 			return addColumnIfMissing(ctx, d.db, "todos", "priority", "TEXT NOT NULL DEFAULT ''")
 		},
+		// Add the position column to pre-existing predefined_priorities tables
+		// so priorities carry an explicit user-defined order.
+		func(ctx context.Context) error {
+			return addColumnIfMissing(ctx, d.db, "predefined_priorities", "position", "INTEGER NOT NULL DEFAULT 0")
+		},
 		// Seed the three default priorities (low, medium, high). Idempotent.
 		func(ctx context.Context) error {
-			defaults := []string{"low", "medium", "high"}
-			for _, name := range defaults {
-				if _, err := d.db.NewInsert().Model(&predefinedPriority{Name: name}).
+			defaults := []struct {
+				name     string
+				position int
+			}{{"low", 0}, {"medium", 1}, {"high", 2}}
+			for _, def := range defaults {
+				if _, err := d.db.NewInsert().Model(&predefinedPriority{Name: def.name, Position: def.position}).
 					On("CONFLICT (name) DO NOTHING").Exec(ctx); err != nil {
 					return err
 				}
@@ -234,6 +243,11 @@ func (d *DB) migrate(ctx context.Context) error {
 		func(ctx context.Context) error {
 			_, err := d.db.NewCreateIndex().IfNotExists().Index("idx_todos_parent").
 				Table("todos").Column("board_id", "parent_id", "position").Exec(ctx)
+			return err
+		},
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateIndex().IfNotExists().Index("idx_predef_priorities_position").
+				Table("predefined_priorities").Column("position", "id").Exec(ctx)
 			return err
 		},
 	}
@@ -332,10 +346,19 @@ func (d *DB) ListFiltered(ctx context.Context, boardID int64, q filter.Query, to
 	if err != nil {
 		return nil, err
 	}
+	rankOf, err := d.priorityRanks(ctx)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]filter.Item, len(all))
 	byID := make(map[int64]models.Todo, len(all))
 	for i, t := range all {
 		items[i] = toFilterItem(t)
+		if t.Priority != "" {
+			if rank, ok := rankOf[t.Priority]; ok {
+				items[i].PriorityRank = rank
+			}
+		}
 		byID[t.ID] = t
 	}
 	visible := filter.Apply(items, q, today)
@@ -345,6 +368,24 @@ func (d *DB) ListFiltered(ctx context.Context, boardID int64, q filter.Query, to
 		t := byID[it.ID]
 		t.Position = it.Position
 		out = append(out, t)
+	}
+	return out, nil
+}
+
+// priorityRanks returns a map of priority name → position from
+// predefined_priorities, so the filter can sort by user-defined rank.
+func (d *DB) priorityRanks(ctx context.Context) (map[string]int, error) {
+	var rows []struct {
+		Name     string `bun:"name"`
+		Position int    `bun:"position"`
+	}
+	if err := d.db.NewSelect().ColumnExpr("name, position").TableExpr("predefined_priorities").
+		Scan(ctx, &rows); err != nil {
+		return nil, err
+	}
+	out := make(map[string]int, len(rows))
+	for _, r := range rows {
+		out[r.Name] = r.Position
 	}
 	return out, nil
 }
@@ -963,77 +1004,109 @@ func (d *DB) ListLabels(ctx context.Context) ([]models.Label, error) {
 	}
 	colorOf := make(map[string]string, len(adhoc))
 	out := make([]models.Label, 0, len(adhoc)+len(predefined))
-	seen := make(map[string]struct{}, len(adhoc)+len(predefined))
+	seenLow := make(map[string]struct{}, len(adhoc)+len(predefined))
 	for _, l := range adhoc {
-		if _, dup := seen[l.Name]; dup {
+		low := strings.ToLower(l.Name)
+		if _, dup := seenLow[low]; dup {
 			continue
 		}
-		seen[l.Name] = struct{}{}
-		colorOf[l.Name] = l.Color
+		seenLow[low] = struct{}{}
+		colorOf[low] = l.Color
 		out = append(out, models.Label{Name: l.Name, Color: l.Color})
 	}
 	for _, n := range predefined {
-		if _, dup := seen[n]; dup {
+		low := strings.ToLower(n)
+		if _, dup := seenLow[low]; dup {
 			continue
 		}
-		seen[n] = struct{}{}
-		// Predefined labels have no colour in the predefined_labels table;
-		// look up any colour the ad-hoc labels table may hold for the same name.
-		out = append(out, models.Label{Name: n, Color: colorOf[n]})
+		seenLow[low] = struct{}{}
+		out = append(out, models.Label{Name: n, Color: colorOf[low]})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
 	return out, nil
 }
 
 // SetLabelColor sets the user-defined colour for a label. An empty colour
 // clears it so the label reverts to the auto-assigned palette colour.
+// Matching is case-insensitive: if the label exists under different casing,
+// that row is updated.
 func (d *DB) SetLabelColor(ctx context.Context, name string, color string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ErrInvalidInput
 	}
-	// Ensure the label exists (upsert) so colours can be set for labels not
-	// yet attached to any todo.
-	_, err := d.db.NewInsert().Model(&label{Name: name, Color: color}).
+	var existing string
+	err := d.db.NewSelect().ColumnExpr("name").TableExpr("labels").
+		Where("LOWER(name) = ?", strings.ToLower(name)).Limit(1).Scan(ctx, &existing)
+	if err == nil {
+		_, err = d.db.NewUpdate().Model((*label)(nil)).
+			Set("color = ?", color).
+			Where("name = ?", existing).
+			Exec(ctx)
+		return err
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err = d.db.NewInsert().Model(&label{Name: name, Color: color}).
 		On("CONFLICT (name) DO UPDATE SET color = excluded.color").
 		Exec(ctx)
 	return err
 }
 
 // AddPredefinedLabel records a label as predefined so it always appears in the
-// global label list even when no todo uses it. Idempotent on name.
+// global label list even when no todo uses it. Idempotent on name
+// (case-insensitive).
 func (d *DB) AddPredefinedLabel(ctx context.Context, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ErrInvalidInput
 	}
-	_, err := d.db.NewInsert().Model(&predefinedLabel{Name: name}).
-		On("CONFLICT (name) DO NOTHING").Exec(ctx)
+	low := strings.ToLower(name)
+	var existing string
+	err := d.db.NewSelect().ColumnExpr("name").TableExpr("predefined_labels").
+		Where("LOWER(name) = ?", low).Limit(1).Scan(ctx, &existing)
+	if err == nil {
+		return nil // already exists (case-insensitive match)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err = d.db.NewInsert().Model(&predefinedLabel{Name: name}).Ignore().Exec(ctx)
 	return err
 }
 
 // RemovePredefinedLabel removes a label from the predefined set. Ad-hoc usages
-// on todos are unaffected.
+// on todos are unaffected. Matching is case-insensitive.
 func (d *DB) RemovePredefinedLabel(ctx context.Context, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ErrInvalidInput
 	}
-	_, err := d.db.NewDelete().Model((*predefinedLabel)(nil)).Where("name = ?", name).Exec(ctx)
+	_, err := d.db.NewDelete().Model((*predefinedLabel)(nil)).
+		Where("LOWER(name) = ?", strings.ToLower(name)).Exec(ctx)
 	return err
 }
 
 // ListPriorities returns all known priorities, combining predefined priorities
-// with any priorities currently in use across todos. De-duplicated and sorted.
-// Each priority carries its colour (a hex string, empty when unset).
+// with any priorities currently in use across todos. De-duplicated. Each
+// priority carries its colour (a hex string, empty when unset) and its position
+// from the predefined set (nil when the priority is only ad-hoc). Ordered by
+// position (predefined first, ad-hoc last, alphabetical within each group).
 func (d *DB) ListPriorities(ctx context.Context) ([]models.Priority, error) {
 	var adhoc []string
 	if err := d.db.NewSelect().ColumnExpr("DISTINCT priority").TableExpr("todos").
 		Where("priority <> ''").Scan(ctx, &adhoc); err != nil {
 		return nil, err
 	}
-	var predefined []string
-	if err := d.db.NewSelect().ColumnExpr("name").TableExpr("predefined_priorities").Scan(ctx, &predefined); err != nil {
+	var predefined []struct {
+		Name     string `bun:"name"`
+		Position int    `bun:"position"`
+	}
+	if err := d.db.NewSelect().ColumnExpr("name, position").TableExpr("predefined_priorities").
+		OrderExpr("position, id").Scan(ctx, &predefined); err != nil {
 		return nil, err
 	}
 	var colored []struct {
@@ -1049,6 +1122,14 @@ func (d *DB) ListPriorities(ctx context.Context) ([]models.Priority, error) {
 	}
 	seen := make(map[string]struct{}, len(adhoc)+len(predefined))
 	out := make([]models.Priority, 0, len(adhoc)+len(predefined))
+	for _, p := range predefined {
+		if _, dup := seen[p.Name]; dup {
+			continue
+		}
+		seen[p.Name] = struct{}{}
+		pos := p.Position
+		out = append(out, models.Priority{Name: p.Name, Color: colorOf[p.Name], Position: &pos})
+	}
 	for _, n := range adhoc {
 		if _, dup := seen[n]; dup {
 			continue
@@ -1056,14 +1137,6 @@ func (d *DB) ListPriorities(ctx context.Context) ([]models.Priority, error) {
 		seen[n] = struct{}{}
 		out = append(out, models.Priority{Name: n, Color: colorOf[n]})
 	}
-	for _, n := range predefined {
-		if _, dup := seen[n]; dup {
-			continue
-		}
-		seen[n] = struct{}{}
-		out = append(out, models.Priority{Name: n, Color: colorOf[n]})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 
@@ -1081,13 +1154,19 @@ func (d *DB) SetPriorityColor(ctx context.Context, name string, color string) er
 }
 
 // AddPredefinedPriority records a priority as predefined so it always appears in
-// the global priority list even when no todo uses it. Idempotent on name.
+// the global priority list even when no todo uses it. Idempotent on name. New
+// priorities are appended at the end of the ordering (position = max + 1).
 func (d *DB) AddPredefinedPriority(ctx context.Context, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ErrInvalidInput
 	}
-	_, err := d.db.NewInsert().Model(&predefinedPriority{Name: name}).
+	var maxPos int
+	if err := d.db.NewSelect().ColumnExpr("COALESCE(MAX(position), -1)").
+		TableExpr("predefined_priorities").Scan(ctx, &maxPos); err != nil {
+		return err
+	}
+	_, err := d.db.NewInsert().Model(&predefinedPriority{Name: name, Position: maxPos + 1}).
 		On("CONFLICT (name) DO NOTHING").Exec(ctx)
 	return err
 }
@@ -1101,6 +1180,25 @@ func (d *DB) RemovePredefinedPriority(ctx context.Context, name string) error {
 	}
 	_, err := d.db.NewDelete().Model((*predefinedPriority)(nil)).Where("name = ?", name).Exec(ctx)
 	return err
+}
+
+// ReorderPriorities sets the position of each predefined priority to match the
+// order of the supplied names slice. Names not already in the predefined set
+// are ignored. Priorities missing from the slice retain their old positions.
+func (d *DB) ReorderPriorities(ctx context.Context, names []string) error {
+	for i, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, err := d.db.NewUpdate().Model((*predefinedPriority)(nil)).
+			Set("position = ?", i).
+			Where("name = ?", name).
+			Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolvePosition returns the absolute insert position. If requested is nil the
@@ -1142,27 +1240,34 @@ func shiftSiblingsAfter(ctx context.Context, run bun.IDB, boardID int64, parent 
 }
 
 // setLabelsTx replaces the set of labels for a todo, creating any unknown
-// label names as needed.
+// label names as needed. Label matching is case-insensitive: if a label
+// differs only in casing from an existing one, the existing one is reused.
 func setLabelsTx(ctx context.Context, run bun.IDB, todoID int64, labels []string) error {
 	if _, err := run.NewDelete().Model((*todoLabel)(nil)).Where("todo_id = ?", todoID).Exec(ctx); err != nil {
 		return err
 	}
-	seen := make(map[string]struct{}, len(labels))
+	seenLow := make(map[string]struct{}, len(labels))
 	for _, l := range labels {
 		l = strings.TrimSpace(l)
 		if l == "" {
 			continue
 		}
-		if _, dup := seen[l]; dup {
+		low := strings.ToLower(l)
+		if _, dup := seenLow[low]; dup {
 			continue
 		}
-		seen[l] = struct{}{}
-		// Upsert the label and fetch its id in one round-trip via RETURNING.
+		seenLow[low] = struct{}{}
 		var lid int64
-		if err := run.NewInsert().Model(&label{Name: l}).
-			On("CONFLICT (name) DO UPDATE SET name = excluded.name").
-			Returning("id").Scan(ctx, &lid); err != nil {
-			return err
+		err := run.NewSelect().ColumnExpr("id").TableExpr("labels").
+			Where("LOWER(name) = ?", low).Limit(1).Scan(ctx, &lid)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if err := run.NewInsert().Model(&label{Name: l}).
+				Returning("id").Scan(ctx, &lid); err != nil {
+				return err
+			}
 		}
 		if _, err := run.NewInsert().Model(&todoLabel{TodoID: todoID, LabelID: lid}).Ignore().Exec(ctx); err != nil {
 			return err

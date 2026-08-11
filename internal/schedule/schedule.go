@@ -671,11 +671,12 @@ func Parse(raw string, now time.Time) (Schedule, error) {
 }
 
 // QuickAdd is the parsed result of a quick-add line: a title, any #label tags,
-// and an optional trailing schedule.
+// a single !priority, and an optional trailing schedule.
 type QuickAdd struct {
-	Title    string
-	Labels   []string
-	Schedule Schedule
+	Title     string
+	Labels    []string
+	Priority  string
+	Schedule  Schedule
 }
 
 // Extract parses a quick-add line into a title, optional #label tags, and an
@@ -698,8 +699,9 @@ type QuickAdd struct {
 // ok is false when the title would be empty (blank input, or only labels).
 func Extract(raw string, now time.Time) (QuickAdd, bool) {
 	labels, body := stripLabels(raw)
+	priority, body := stripPriority(body)
 	if body == "" {
-		return QuickAdd{Labels: labels}, false
+		return QuickAdd{Labels: labels, Priority: priority}, false
 	}
 	toks := strings.Fields(body)
 	for k := 1; k < len(toks); k++ {
@@ -713,9 +715,26 @@ func Extract(raw string, now time.Time) (QuickAdd, bool) {
 				continue // last token was ignored by the parser: trailing junk
 			}
 		}
-		return QuickAdd{Title: strings.Join(toks[:k], " "), Labels: labels, Schedule: s}, true
+		return QuickAdd{Title: strings.Join(toks[:k], " "), Labels: labels, Priority: priority, Schedule: s}, true
 	}
-	return QuickAdd{Title: body, Labels: labels}, true
+	return QuickAdd{Title: body, Labels: labels, Priority: priority}, true
+}
+
+// stripPriority removes a leading or trailing !priority token from s, returning
+// the priority name (without "!") and the cleaned text. Only the first
+// !priority token is extracted; if there are more they are left as-is in the
+// text (the caller will see them as title words).
+func stripPriority(s string) (priority string, cleaned string) {
+	loc := rePriority.FindStringSubmatchIndex(s)
+	if loc == nil {
+		return "", s
+	}
+	// loc[2]:loc[3] is the capture group (the name after "!").
+	priority = s[loc[2]:loc[3]]
+	// Remove the matched token (loc[0]:loc[1]) and trim/collapse whitespace.
+	cleaned = s[:loc[0]] + s[loc[1]:]
+	cleaned = strings.TrimSpace(reSpaces.ReplaceAllString(cleaned, " "))
+	return priority, cleaned
 }
 
 // stripLabels removes #label tags from s, returning the de-duplicated label
@@ -1124,6 +1143,7 @@ var (
 	reEvery        = regexp.MustCompile(`^(ev|every)(!)?(?:\s+|$)`)
 	reBareKeywords = regexp.MustCompile(`^(daily|weekly|monthly|yearly|quarterly|fortnight|fortnightly|weekdays?|weekends?|workdays?)\b`)
 
-	reLabel  = regexp.MustCompile(`#([^\s#,]+)`)
-	reSpaces = regexp.MustCompile(`\s+`)
+	reLabel    = regexp.MustCompile(`#([^\s#,]+)`)
+	rePriority = regexp.MustCompile(`(?:^|\s)!([^\s!,]+)`)
+	reSpaces   = regexp.MustCompile(`\s+`)
 )

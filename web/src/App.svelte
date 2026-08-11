@@ -5,8 +5,14 @@
   import NewTodo from './lib/NewTodo.svelte';
   import BoardSwitcher from './lib/BoardSwitcher.svelte';
   import FilterBar from './lib/FilterBar.svelte';
+  import Icon from './lib/Icon.svelte';
+  import LabelModal from './lib/LabelModal.svelte';
+  import PriorityModal from './lib/PriorityModal.svelte';
 
   const roots = $derived(store.visibleChildrenOf(null));
+
+  let labelModalOpen = $state(false);
+  let priorityModalOpen = $state(false);
 
   onMount(() => {
     store.load();
@@ -22,6 +28,14 @@
     <h1>Todo</h1>
     {#if store.loading}<span class="muted">Loading…</span>{/if}
     {#if store.error}<span class="error">{store.error}</span>{/if}
+    <div class="toolbar">
+      <button class="ghost tool-btn" onclick={() => (labelModalOpen = true)} title="Manage labels">
+        <Icon name="tag" size={16} /><span class="tool-label">Labels</span>
+      </button>
+      <button class="ghost tool-btn" onclick={() => (priorityModalOpen = true)} title="Manage priorities">
+        <Icon name="flag" size={16} /><span class="tool-label">Priorities</span>
+      </button>
+    </div>
   </div>
   <BoardSwitcher />
 </header>
@@ -63,6 +77,13 @@
   </ul>
 {/if}
 
+{#if labelModalOpen}
+  <LabelModal onClose={() => (labelModalOpen = false)} />
+{/if}
+{#if priorityModalOpen}
+  <PriorityModal onClose={() => (priorityModalOpen = false)} />
+{/if}
+
 <style>
   header {
     display: flex;
@@ -74,7 +95,7 @@
   }
   .header-row {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 12px;
   }
   h1 {
@@ -86,6 +107,18 @@
   }
   .error {
     color: var(--danger);
+  }
+  .toolbar {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 4px;
+  }
+  .tool-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    padding: 4px 8px;
   }
   .list-toolbar {
     padding: 0 20px;

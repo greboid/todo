@@ -57,6 +57,7 @@ export const api = {
   listPriorities: () => req('/priorities'),
   updatePriority: (name, color) => req(`/priorities/${encodeURIComponent(name)}`, { method: 'PUT', body: { color } }),
   addPredefinedPriority: (name) => req('/priorities/predefined', { method: 'POST', body: { name } }),
+  reorderPriorities: (names) => req('/priorities/reorder', { method: 'POST', body: { names } }),
   removePredefinedPriority: (name) => req(`/priorities/predefined/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   listBoards: () => req('/boards'),
   createBoard: (data) => req('/boards', { method: 'POST', body: data }),

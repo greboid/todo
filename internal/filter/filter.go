@@ -36,6 +36,7 @@ type Item struct {
 	Completed     bool
 	Labels        []string
 	Priority      string // priority name, "" = none
+	PriorityRank  int    // user-defined priority order (-1 = no rank / ad-hoc)
 	DueDate       string // "YYYY-MM-DD" or "" (none)
 	HasRecurrence bool
 }
@@ -316,8 +317,8 @@ func testDate(it Item, d dateSpec, today, weekEnd string) bool {
 }
 
 // Match reports whether the item satisfies every active criterion. today is the
-// reference ISO date (YYYY-MM-DD); weekEnd is today+7. Label matching is
-// case-sensitive, matching stored label names exactly.
+// reference ISO date (YYYY-MM-DD); weekEnd is today+7. Label and priority
+// matching is case-insensitive.
 func (q Query) Match(it Item, today, weekEnd string) bool {
 	if q.text != "" {
 		hay := strings.ToLower(it.Title + " " + it.Description)
@@ -364,10 +365,10 @@ func (q Query) Match(it Item, today, weekEnd string) bool {
 func anyLabel(have, want []string) bool {
 	set := make(map[string]bool, len(have))
 	for _, l := range have {
-		set[l] = true
+		set[strings.ToLower(l)] = true
 	}
 	for _, w := range want {
-		if set[w] {
+		if set[strings.ToLower(w)] {
 			return true
 		}
 	}
@@ -378,10 +379,12 @@ func hasAnyLabel(it Item) bool { return len(it.Labels) > 0 }
 
 func hasPriority(it Item) bool { return it.Priority != "" }
 
-// containsString reports whether s equals any element of list.
+// containsString reports whether s equals any element of list
+// (case-insensitive).
 func containsString(list []string, s string) bool {
+	low := strings.ToLower(s)
 	for _, v := range list {
-		if v == s {
+		if strings.ToLower(v) == low {
 			return true
 		}
 	}
@@ -520,7 +523,7 @@ func lessItem(a, b Item, keys []SortKey) bool {
 func compareKey(a, b Item, field string) int {
 	switch field {
 	case "priority":
-		return cmpEmptyLast(a.Priority, b.Priority)
+		return cmpPriorityRank(a.Priority, a.PriorityRank, b.Priority, b.PriorityRank)
 	case "label":
 		return cmpEmptyLast(firstLabel(a.Labels), firstLabel(b.Labels))
 	case "date":
@@ -534,6 +537,39 @@ func firstLabel(ls []string) string {
 		return ""
 	}
 	return ls[0]
+}
+
+// cmpPriorityRank compares two priorities by their user-defined rank first,
+// falling back to alphabetical for ad-hoc priorities without a rank. Empty
+// priorities sort last. A rank of -1 means the priority has no explicit
+// position (ad-hoc); ranked priorities sort before unranked ones.
+func cmpPriorityRank(aName string, aRank int, bName string, bRank int) int {
+	aEmpty := aName == ""
+	bEmpty := bName == ""
+	if aEmpty && bEmpty {
+		return 0
+	}
+	if aEmpty {
+		return 1
+	}
+	if bEmpty {
+		return -1
+	}
+	aRanked := aRank >= 0
+	bRanked := bRank >= 0
+	if aRanked && bRanked {
+		if aRank != bRank {
+			return aRank - bRank
+		}
+		return strings.Compare(aName, bName)
+	}
+	if aRanked {
+		return -1
+	}
+	if bRanked {
+		return 1
+	}
+	return strings.Compare(aName, bName)
 }
 
 // cmpEmptyLast compares two strings, treating "" as greater than any non-empty
