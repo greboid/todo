@@ -117,7 +117,7 @@ function createStore() {
         else params.delete('board');
         changed = true;
       }
-      if (params.get('filter') !== filterText) {
+      if (!filterError && params.get('filter') !== filterText) {
         if (filterText) params.set('filter', filterText);
         else params.delete('filter');
         changed = true;
@@ -211,7 +211,6 @@ function createStore() {
   // A 400 means the filter is invalid: surface it as filterError and keep the
   // last good list rather than clearing it.
   async function load() {
-    readURLParams();
     loading = true;
     error = null;
     try {
@@ -481,6 +480,7 @@ function createStore() {
     dropPosition,
     boardById,
     load,
+    readURL: readURLParams,
     selectBoard,
     createBoard,
     renameBoard,
