@@ -91,7 +91,7 @@ function createStore() {
 
   // --- URL sync ---
   // board and filter are mirrored into the query string so views are
-  // shareable/bookmarkable. replaceState avoids polluting browser history.
+  // shareable/bookmarkable and navigable via back/forward.
   function readURLParams() {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -107,7 +107,13 @@ function createStore() {
     }
   }
 
+  let urlTimer = null;
   function syncURL() {
+    clearTimeout(urlTimer);
+    urlTimer = setTimeout(doSyncURL, 1000);
+  }
+
+  function doSyncURL() {
     try {
       const params = new URLSearchParams(window.location.search);
       let changed = false;
@@ -125,7 +131,7 @@ function createStore() {
       if (changed) {
         const qs = params.toString();
         const url = qs ? `?${qs}` : window.location.pathname;
-        window.history.replaceState(null, '', url);
+        window.history.pushState(null, '', url);
       }
     } catch {
       /* window/history unavailable — ignore */
