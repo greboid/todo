@@ -21,6 +21,12 @@
   onMount(() => {
     store.readURL();
     store.load();
+    const onPop = () => {
+      store.readURL();
+      store.load();
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   });
 
   async function onAddRoot(payload) {
