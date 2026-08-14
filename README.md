@@ -61,6 +61,88 @@ podman build -t todo .
 podman run -p 8080:8080 -v todo-data:/data todo
 ```
 
+Equivalent Compose files for both storage backends — save either one as
+`compose.yaml` and run `docker compose up -d` (or `podman compose up -d`).
+
+> **Warning**
+> The app has **no authentication**, so it must never be exposed to a public
+> interface. Both files below bind the port to loopback (`127.0.0.1`) only:
+> run a reverse proxy on the same host and forward it to
+> <http://127.0.0.1:8080>. Whatever the proxy is (nginx, Caddy, Traefik, ...),
+> let it own TLS and put some access control in front (basic auth, client
+> certs, VPN, IP allowlist). If the reverse proxy itself runs as a container,
+> delete the `ports` section and instead attach both containers to a shared
+> Compose network, proxying the service name (`http://todo:8080`) with no
+> published port at all.
+
+**SQLite (default):**
+
+```yaml
+services:
+  todo:
+    # CI publishes this image from the Containerfile. Pin a release tag
+    # instead of tracking latest, e.g. ghcr.io/greboid/todo:0.1.1.
+    # (Or build from source: uncomment the next line and run with --build.)
+    # build: .
+    image: ghcr.io/greboid/todo:latest
+    restart: unless-stopped
+    # Loopback only — do NOT widen this to "8080:8080". That publishes the
+    # port on every interface and, since there is no auth, anyone who can
+    # reach the host can read and edit the data.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - todo-data:/data
+
+volumes:
+  todo-data:
+```
+
+**Postgres** (change both passwords before use; the app connects to Postgres
+exactly once at startup with no retry, hence the healthcheck-gated
+`depends_on`):
+
+```yaml
+services:
+  todo:
+    # CI publishes this image from the Containerfile. Pin a release tag
+    # instead of tracking latest, e.g. ghcr.io/greboid/todo:0.1.1.
+    # (Or build from source: uncomment the next line and run with --build.)
+    # build: .
+    image: ghcr.io/greboid/todo:latest
+    restart: unless-stopped
+    # Loopback only — do NOT widen this to "8080:8080". That publishes the
+    # port on every interface and, since there is no auth, anyone who can
+    # reach the host can read and edit the data.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      TODO_DB_DRIVER: postgres
+      TODO_DB: postgres://todo:pick-a-password@db:5432/todo?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: todo
+      POSTGRES_PASSWORD: pick-a-password
+      POSTGRES_DB: todo
+    volumes:
+      - todo-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U todo -d todo"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  todo-data:
+  todo-db:
+```
+
 ## Configuration
 
 The app is configured entirely through environment variables:
