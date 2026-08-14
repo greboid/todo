@@ -27,6 +27,8 @@ func TestExtract(t *testing.T) {
 		{"trailing iso date", "dentist 2026-08-15", "dentist", nil, "2026-08-15", false, "", 0, nil, nil},
 		{"trailing month day", "dentist aug 15", "dentist", nil, "2026-08-15", false, "", 0, nil, nil},
 		{"weekly recurrence", "submit report every friday", "submit report", nil, "", true, "weekly", 1, []int{5}, nil},
+		{"repeat recurrence", "water plants repeat weekly", "water plants", nil, "", true, "weekly", 1, nil, nil},
+		{"repeat every recurrence", "call mom repeat every week", "call mom", nil, "", true, "weekly", 1, nil, nil},
 		{"monthly recurrence", "pay rent every month on the 1st", "pay rent", nil, "", true, "monthly", 1, nil, []int{1}},
 		{"weekly weekday list", "standup every week on mon, wed", "standup", nil, "", true, "weekly", 1, []int{1, 3}, nil},
 		{"label stripped", "buy milk #errands tomorrow", "buy milk", []string{"errands"}, "2026-08-11", false, "", 0, nil, nil},

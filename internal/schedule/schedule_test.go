@@ -87,6 +87,18 @@ func TestParse(t *testing.T) {
 		{"every year", "every year", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "yearly", Interval: 1})}, ""},
 		{"every bang", "every! day", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1, FromCompletion: true})}, ""},
 
+		// "repeat" as a synonym for "every"
+		{"repeat every week", "repeat every week", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1})}, ""},
+		{
+			"repeat interval", "repeat 2 weeks on mon, wed",
+			Schedule{DueDate: "2026-08-10", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 2, Weekdays: []int{1, 3}})},
+			"",
+		},
+		{"repeat bare keyword", "repeat daily", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1})}, ""},
+		{"repeats monthly", "repeats monthly", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1})}, ""},
+		{"repeat bang", "repeat! day", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1, FromCompletion: true})}, ""},
+		{"repeat with clauses", "repeat month on the 15th starting sep 1", Schedule{DueDate: "2026-09-01", Recurrence: rc(models.Recurrence{Frequency: "monthly", Interval: 1, MonthDays: []int{15}})}, ""},
+
 		// clauses
 		{"starting", "every day starting sep 1", Schedule{DueDate: "2026-09-01", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1})}, ""},
 		{"from", "every day from aug 15", Schedule{DueDate: "2026-08-15", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1})}, ""},
@@ -101,6 +113,8 @@ func TestParse(t *testing.T) {
 
 		// errors
 		{"every alone", "every", Schedule{}, `missing repeat pattern`},
+		{"repeat alone", "repeat", Schedule{}, `missing repeat pattern`},
+		{"repeat banana", "repeat banana", Schedule{}, "unrecognized repeat"},
 		{"every banana", "every banana", Schedule{}, "unrecognized repeat"},
 		{"every hour", "every hour", Schedule{}, "times are not supported"},
 		{"at 3pm", "at 3pm", Schedule{}, "couldn't read a date"},
