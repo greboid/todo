@@ -235,6 +235,20 @@ func (d *DB) migrate(ctx context.Context) error {
 			}
 			return nil
 		},
+		// Seed a default board on a fresh database (and heal any existing
+		// database that somehow has none) so the app is usable immediately.
+		// Idempotent: only inserts when the boards table is empty.
+		func(ctx context.Context) error {
+			n, err := d.db.NewSelect().Model((*board)(nil)).Count(ctx)
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				return nil
+			}
+			_, err = d.db.NewInsert().Model(&board{Name: "Personal", Position: 0}).Exec(ctx)
+			return err
+		},
 		func(ctx context.Context) error {
 			_, err := d.db.NewCreateIndex().IfNotExists().Index("idx_boards_position").
 				Table("boards").Column("position", "id").Exec(ctx)
@@ -1088,6 +1102,49 @@ func (d *DB) RemovePredefinedLabel(ctx context.Context, name string) error {
 	_, err := d.db.NewDelete().Model((*predefinedLabel)(nil)).
 		Where("LOWER(name) = ?", strings.ToLower(name)).Exec(ctx)
 	return err
+}
+
+// DeleteLabel removes a label everywhere: its todo attachments, its colour row,
+// and its predefined entry. Matching is case-insensitive. Returns ErrNotFound
+// when no label with that name exists in any of the three tables.
+func (d *DB) DeleteLabel(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ErrInvalidInput
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// The todo_links delete is explicit (not left to ON DELETE CASCADE) so
+	// pre-existing databases whose todo_labels table lacks the foreign key
+	// are cleaned up too.
+	low := strings.ToLower(name)
+	affected := int64(0)
+	for _, del := range []struct {
+		model any
+		where string
+	}{
+		{(*todoLabel)(nil), "label_id IN (SELECT id FROM labels WHERE LOWER(name) = ?)"},
+		{(*label)(nil), "LOWER(name) = ?"},
+		{(*predefinedLabel)(nil), "LOWER(name) = ?"},
+	} {
+		res, err := tx.NewDelete().Model(del.model).Where(del.where, low).Exec(ctx)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		affected += n
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
 
 // ListPriorities returns all known priorities, combining predefined priorities

@@ -94,6 +94,13 @@
       </li>
     {/each}
   </ul>
+{:else if !store.loading}
+  <div class="no-boards">
+    <p class="muted">No boards yet. Create one to start adding todos.</p>
+    <button class="primary" onclick={() => (boardModalOpen = true)}>
+      <Icon name="board" size={16} /> Create a board
+    </button>
+  </div>
 {/if}
 
 {#if boardModalOpen}
@@ -158,6 +165,22 @@
     gap: 12px;
     color: var(--muted);
     font-size: 13px;
+  }
+  .no-boards {
+    padding: 48px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .no-boards p {
+    margin: 0;
+    font-size: 13px;
+  }
+  .no-boards button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
   .roots {
     padding: 12px 20px;

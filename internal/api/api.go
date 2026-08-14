@@ -99,6 +99,7 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/schedule/extract", h.extractSchedule)
 	mux.HandleFunc("GET /api/labels", h.listLabels)
 	mux.HandleFunc("PUT /api/labels/{name}", h.updateLabel)
+	mux.HandleFunc("DELETE /api/labels/{name}", h.deleteLabel)
 	mux.HandleFunc("POST /api/labels/predefined", h.addPredefinedLabel)
 	mux.HandleFunc("DELETE /api/labels/predefined/{name}", h.removePredefinedLabel)
 	mux.HandleFunc("GET /api/priorities", h.listPriorities)
@@ -335,6 +336,19 @@ func (h *Handler) removePredefinedLabel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := h.store.RemovePredefinedLabel(r.Context(), name); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) deleteLabel(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	if err := h.store.DeleteLabel(r.Context(), name); err != nil {
 		writeStoreErr(w, err)
 		return
 	}

@@ -258,6 +258,13 @@ function createStore() {
   async function createBoard({ name }) {
     const created = await api.createBoard({ name });
     boards = [...boards, created].sort(byPositionThenId);
+    // Creating the first board makes it active so the todo list appears
+    // without a reload.
+    if (activeBoardId == null) {
+      activeBoardId = created.id;
+      storage.set('todo:activeBoard', String(created.id));
+      syncURL();
+    }
     return created;
   }
 
@@ -376,9 +383,11 @@ function createStore() {
     await loadLabels();
   }
 
-  async function removePredefinedLabel(name) {
-    await api.removePredefinedLabel(name);
-    await loadLabels();
+  // Deleting a label detaches it from every todo, so filter membership can
+  // change (e.g. label: filters); load() re-fetches todos and labels.
+  async function deleteLabel(name) {
+    await api.deleteLabel(name);
+    await load();
   }
 
   async function updateLabelColor(name, color) {
@@ -499,7 +508,7 @@ function createStore() {
     move,
     loadLabels,
     addPredefinedLabel,
-    removePredefinedLabel,
+    deleteLabel,
     updateLabelColor,
     loadPriorities,
     addPredefinedPriority,
