@@ -74,6 +74,11 @@ function createStore() {
   let editingDirty = $state(false);
   let rejectionTick = $state(0);
 
+  // Single right-click context menu: holds the id of the todo whose action
+  // buttons the menu duplicates, plus the cursor position in viewport
+  // coordinates (the menu is rendered position:fixed by the owning item).
+  let contextMenu = $state(null);
+
   // --- Filter ---
   // The list filter is evaluated entirely server-side (GET /api/todos?filter=).
   // Syntax: label:<name>, date:<preset|YYYY-MM-DD|range>, has:<complete|label|
@@ -211,6 +216,14 @@ function createStore() {
 
   function markEditDirty() {
     if (editingId != null) editingDirty = true;
+  }
+
+  function openContextMenu(todoId, x, y) {
+    contextMenu = { todoId, x, y };
+  }
+
+  function closeContextMenu() {
+    contextMenu = null;
   }
 
   // (Re)fetch boards, the filtered todo list for the active board, and labels.
@@ -454,6 +467,9 @@ function createStore() {
     get rejectionTick() {
       return rejectionTick;
     },
+    get contextMenu() {
+      return contextMenu;
+    },
     get filterText() {
       return filterText;
     },
@@ -489,6 +505,8 @@ function createStore() {
     beginEdit,
     endEdit,
     markEditDirty,
+    openContextMenu,
+    closeContextMenu,
     childrenOf,
     visibleChildrenOf,
     byId,
