@@ -4,6 +4,7 @@
   import DOMPurify from 'dompurify';
   import NewTodo from './NewTodo.svelte';
   import Icon from './Icon.svelte';
+  import Calendar from './Calendar.svelte';
   import Self from './TodoItem.svelte';
   import { focus } from './actions.js';
   import { api } from './api.js';
@@ -50,6 +51,9 @@
   // Inline priority picker state.
   let priorityPickerOpen = $state(false);
   let activePriority = $state('');
+
+  // Inline defer (due date) picker state.
+  let deferPickerOpen = $state(false);
 
   // Right-click context menu duplicating the action buttons. Which todo owns
   // the menu lives in the store (like editingId) so only one is ever open;
@@ -375,6 +379,22 @@
     return found ? found.color : '';
   }
 
+  function openDeferPicker() {
+    deferPickerOpen = true;
+  }
+
+  async function deferTo(date) {
+    deferPickerOpen = false;
+    await store.update(todo.id, { dueDate: date });
+  }
+
+  function onDeferKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      deferPickerOpen = false;
+    }
+  }
+
   // --- Edit-form priority selection ---
   function toggleDraftPriority(name) {
     draftPriority = draftPriority === name ? '' : name;
@@ -614,6 +634,7 @@
         <button class="ghost" onclick={startEdit} aria-label="Edit"><Icon name="edit" size={16} /></button>
         <button class="ghost" onclick={openLabelPicker} aria-label="Labels"><Icon name="tag" size={16} /></button>
         <button class="ghost" onclick={openPriorityPicker} aria-label="Priority"><Icon name="flag" size={16} /></button>
+        <button class="ghost" onclick={openDeferPicker} aria-label="Defer" title="Defer"><Icon name="calendar" size={16} /></button>
         <button class="ghost" onclick={() => (addingChild = !addingChild)} aria-label="Add child"><Icon name="plus" size={16} /></button>
         <button class="ghost danger" onclick={onDelete} aria-label="Delete"><Icon name="trash" size={16} /></button>
       </span>
@@ -719,6 +740,16 @@
     </div>
   {/if}
 
+  {#if deferPickerOpen}
+    <div class="label-picker defer-picker" role="dialog" aria-label="Defer" tabindex="-1" onkeydown={onDeferKeydown}>
+      <Calendar selected={todo.dueDate || ''} onPick={deferTo} />
+      <div class="row">
+        <button type="button" class="primary" onclick={() => deferTo(todayISO())}>Today</button>
+        <button type="button" onclick={() => (deferPickerOpen = false)}>Cancel</button>
+      </div>
+    </div>
+  {/if}
+
   {#if addingChild}
     <NewTodo placeholder="Add a subtask…" onAdd={addChild} onCancel={() => (addingChild = false)} />
   {/if}
@@ -740,6 +771,9 @@
       </button>
       <button type="button" role="menuitem" onclick={() => menuAction(openPriorityPicker)}>
         <Icon name="flag" size={16} /> Priority
+      </button>
+      <button type="button" role="menuitem" onclick={() => menuAction(openDeferPicker)}>
+        <Icon name="calendar" size={16} /> Defer
       </button>
       <button type="button" role="menuitem" onclick={() => menuAction(() => (addingChild = !addingChild))}>
         <Icon name="plus" size={16} /> Add child
@@ -1147,5 +1181,8 @@
   .context-menu button.danger:hover {
     background: var(--danger-tint);
     color: var(--danger);
+  }
+  .defer-picker {
+    align-self: flex-start;
   }
 </style>
