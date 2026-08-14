@@ -633,7 +633,10 @@ func Parse(raw string, now time.Time) (Schedule, error) {
 		text = rest
 	}
 	// Accept bare recurrence keywords ("daily", "weekly", ...) as shorthand
-	// for "every <keyword>", matching Todoist.
+	// for "every <keyword>", matching Todoist. "fortnight" is deliberately
+	// excluded: it is a duration noun ("in a fortnight"), not an adverb, so a
+	// bare "fortnight" must not become a recurrence — it only parses as
+	// "in <n> fortnight(s)" (date) or "every fortnight" (recurrence).
 	if reBareKeywords.MatchString(text) {
 		text = "every " + text
 	}
@@ -1164,7 +1167,7 @@ var (
 	reClauseKW     = regexp.MustCompile(`\b(starting|from|ending|until|for)\b`)
 	reEvery        = regexp.MustCompile(`^(ev|every)(!)?(?:\s+|$)`)
 	reRepeat       = regexp.MustCompile(`^repeats?(?:!)?(?:\s+|$)`)
-	reBareKeywords = regexp.MustCompile(`^(daily|weekly|monthly|yearly|quarterly|fortnight|fortnightly|weekdays?|weekends?|workdays?)\b`)
+	reBareKeywords = regexp.MustCompile(`^(daily|weekly|monthly|yearly|quarterly|fortnightly|weekdays?|weekends?|workdays?)\b`)
 
 	reLabel    = regexp.MustCompile(`#([^\s#,]+)`)
 	rePriority = regexp.MustCompile(`(?:^|\s)@([^\s@,]+)`)
