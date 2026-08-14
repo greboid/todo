@@ -196,6 +196,7 @@
     labelPickerOpen = false;
     activePriority = todo.priority || '';
     priorityPickerOpen = false;
+    deferPickerOpen = false;
     // beginEdit refuses if another todo holds a dirty edit. On refusal this
     // todo stays in view mode; the store bumped rejectionTick so the other
     // item can shake.
@@ -362,6 +363,13 @@
   function storedPriorityColor(name) {
     const found = store.priorities.find((p) => p.name === name);
     return found ? found.color : '';
+  }
+
+  function onPriorityPickerKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      priorityPickerOpen = false;
+    }
   }
 
   function openDeferPicker() {
@@ -713,7 +721,7 @@
   {/if}
 
   {#if priorityPickerOpen}
-    <div class="label-picker" role="dialog" aria-label="Priority">
+    <div class="label-picker" role="dialog" aria-label="Priority" tabindex="-1" use:focus onkeydown={onPriorityPickerKeydown}>
       {#if activePriority}
         <div class="chips">
           <button
@@ -754,7 +762,7 @@
   {/if}
 
   {#if deferPickerOpen}
-    <div class="label-picker defer-picker" role="dialog" aria-label="Defer" tabindex="-1" onkeydown={onDeferKeydown}>
+    <div class="label-picker defer-picker" role="dialog" aria-label="Defer" tabindex="-1" use:focus onkeydown={onDeferKeydown}>
       <Calendar selected={todo.dueDate || ''} onPick={deferTo} />
       <div class="row">
         <button type="button" class="primary" onclick={() => deferTo(todayISO())}>Today</button>
