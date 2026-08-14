@@ -33,8 +33,6 @@
   let editing = $derived(store.editingId === todo.id);
   let draftTitle = $state('');
   let draftDesc = $state('');
-  let draftLabels = $state([]);
-  let draftPriority = $state('');
   let draftSchedule = $state(''); // combined free-text due+recurrence field
   let addingChild = $state(false);
   // Single-click on the row toggles a detail view (the description). A short
@@ -145,9 +143,9 @@
 
   // Existing labels that match the current typeahead query and aren't applied.
   const labelSuggestions = $derived(
-    store.labels
-      .filter((l) => !activeLabels.includes(l.name) && l.name.toLowerCase().includes(labelQuery.toLowerCase()))
-      .slice(0, 8),
+    store.labels.filter(
+      (l) => !activeLabels.includes(l.name) && l.name.toLowerCase().includes(labelQuery.toLowerCase()),
+    ),
   );
 
   function onHeadClick(e) {
@@ -189,9 +187,15 @@
     // Seed drafts first so they're ready when beginEdit flips editingId.
     draftTitle = todo.title;
     draftDesc = todo.description || '';
-    draftLabels = [...(todo.labels || [])];
-    draftPriority = todo.priority || '';
     draftSchedule = todo.scheduleText || '';
+    // The edit form embeds the label and priority views, which share state
+    // with the quick pickers; seed them and close the quick pickers so only
+    // the embedded ones show.
+    activeLabels = [...(todo.labels || [])];
+    labelQuery = '';
+    labelPickerOpen = false;
+    activePriority = todo.priority || '';
+    priorityPickerOpen = false;
     // beginEdit refuses if another todo holds a dirty edit. On refusal this
     // todo stays in view mode; the store bumped rejectionTick so the other
     // item can shake.
@@ -208,8 +212,8 @@
     const patch = {
       title: draftTitle.trim() || todo.title,
       description: draftDesc,
-      labels: [...draftLabels],
-      priority: draftPriority,
+      labels: [...activeLabels],
+      priority: activePriority,
     };
     // One field drives both due date and recurrence. Empty clears both. The
     // grammar lives server-side now, so parsing goes through the API.
@@ -301,6 +305,21 @@
     }
   }
 
+  // The edit form embeds the label view: Enter/Space commits the typeahead
+  // query, Escape cancels the whole edit like the other form fields.
+  function onEditLabelInputKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEdit();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (labelQuery.trim()) {
+        commitLabelQuery();
+        store.markEditDirty();
+      }
+    }
+  }
+
   function toggleExisting(label) {
     if (activeLabels.includes(label)) {
       activeLabels = activeLabels.filter((l) => l !== label);
@@ -324,40 +343,6 @@
   function storedColor(name) {
     const found = store.labels.find((l) => l.name === name);
     return found ? found.color : '';
-  }
-
-  // --- Edit-form label chips ---
-  let editLabelQuery = $state('');
-  const editLabelSuggestions = $derived(
-    store.labels
-      .filter((l) => !draftLabels.includes(l.name) && l.name.toLowerCase().includes(editLabelQuery.toLowerCase()))
-      .slice(0, 6),
-  );
-
-  function addEditLabel(name) {
-    name = name.trim();
-    if (!name) return;
-    if (!draftLabels.some((l) => l.toLowerCase() === name.toLowerCase())) {
-      draftLabels = [...draftLabels, name];
-    }
-    editLabelQuery = '';
-  }
-
-  function removeEditLabel(name) {
-    draftLabels = draftLabels.filter((l) => l !== name);
-  }
-
-  function onEditLabelKeydown(e) {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      if (editLabelSuggestions.length === 1) {
-        addEditLabel(editLabelSuggestions[0].name);
-      } else {
-        addEditLabel(editLabelQuery);
-      }
-    } else if (e.key === 'Backspace' && editLabelQuery === '' && draftLabels.length) {
-      draftLabels = draftLabels.slice(0, -1);
-    }
   }
 
   function openPriorityPicker() {
@@ -393,11 +378,6 @@
       e.preventDefault();
       deferPickerOpen = false;
     }
-  }
-
-  // --- Edit-form priority selection ---
-  function toggleDraftPriority(name) {
-    draftPriority = draftPriority === name ? '' : name;
   }
 
   function onDragStart(e) {
@@ -501,16 +481,19 @@
     <form class="edit" onsubmit={(e) => { e.preventDefault(); saveEdit(); }}>
       <input type="text" bind:value={draftTitle} oninput={store.markEditDirty} onkeydown={onEditKeydown} use:focus />
       <textarea bind:value={draftDesc} rows="2" placeholder="Description" oninput={store.markEditDirty} onkeydown={onEditKeydown}></textarea>
-      <div class="chip-field">
+      <div class="label-picker embedded" role="group" aria-label="Labels">
         <div class="chips">
-          {#each draftLabels as label (label)}
+          {#each activeLabels as label (label)}
             <button
               type="button"
               class="chip removable"
               style:background={labelColor(label, storedColor(label)) + '22'}
               style:border-color={labelColor(label, storedColor(label))}
               style:color={labelColor(label, storedColor(label))}
-              onclick={() => removeEditLabel(label)}
+              onclick={() => {
+                toggleExisting(label);
+                store.markEditDirty();
+              }}
             >
               {label}<span class="x">×</span>
             </button>
@@ -518,18 +501,25 @@
         </div>
         <input
           type="text"
-          bind:value={editLabelQuery}
-          placeholder={draftLabels.length ? '' : 'Labels…'}
-          oninput={store.markEditDirty}
-          onkeydown={onEditLabelKeydown}
+          bind:value={labelQuery}
+          placeholder="Add label…"
+          autocomplete="off"
+          onkeydown={onEditLabelInputKeydown}
         />
-        {#if editLabelSuggestions.length && editLabelQuery}
-          <ul class="inline-suggestions">
-            {#each editLabelSuggestions as s (s.name)}
+        {#if labelSuggestions.length}
+          <ul class="suggestions" role="listbox">
+            {#each labelSuggestions as suggestion (suggestion.name)}
               <li>
-                <button type="button" class="inline-suggestion" onclick={() => addEditLabel(s.name)}>
-                  <span class="suggestion-dot" style:background={labelColor(s.name, s.color)}></span>
-                  {s.name}
+                <button
+                  type="button"
+                  class="suggestion"
+                  onclick={() => {
+                    toggleExisting(suggestion.name);
+                    store.markEditDirty();
+                  }}
+                >
+                  <span class="suggestion-dot" style:background={labelColor(suggestion.name, suggestion.color)}></span>
+                  {suggestion.name}
                 </button>
               </li>
             {/each}
@@ -537,20 +527,43 @@
         {/if}
       </div>
       {#if store.priorities.length}
-        <div class="priority-chips">
-          <span class="field-label"><Icon name="flag" size={12} /></span>
-          {#each store.priorities as p (p.name)}
-            <button
-              type="button"
-              class="chip {draftPriority === p.name ? 'selected' : ''}"
-              style:background={draftPriority === p.name ? labelColor(p.name, p.color) + '22' : 'transparent'}
-              style:border-color={draftPriority === p.name ? labelColor(p.name, p.color) : 'var(--line)'}
-              style:color={draftPriority === p.name ? labelColor(p.name, p.color) : 'var(--text)'}
-              onclick={() => toggleDraftPriority(p.name)}
-            >
-              {p.name}
-            </button>
-          {/each}
+        <div class="label-picker embedded" role="group" aria-label="Priority">
+          {#if activePriority}
+            <div class="chips">
+              <button
+                type="button"
+                class="chip removable"
+                style:background={labelColor(activePriority, storedPriorityColor(activePriority)) + '22'}
+                style:border-color={labelColor(activePriority, storedPriorityColor(activePriority))}
+                style:color={labelColor(activePriority, storedPriorityColor(activePriority))}
+                onclick={() => {
+                  activePriority = '';
+                  store.markEditDirty();
+                }}
+              >
+                {activePriority}<span class="x">×</span>
+              </button>
+            </div>
+          {/if}
+          <ul class="suggestions" role="listbox">
+            {#each store.priorities as p (p.name)}
+              <li>
+                <button
+                  type="button"
+                  class="suggestion"
+                  class:selected={activePriority === p.name}
+                  onclick={() => {
+                    selectPriority(p.name);
+                    store.markEditDirty();
+                  }}
+                >
+                  <span class="suggestion-dot" style:background={labelColor(p.name, p.color)}></span>
+                  {p.name}
+                  {#if activePriority === p.name}<span class="check">✓</span>{/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
         </div>
       {/if}
       <input
@@ -987,77 +1000,6 @@
   .schedule {
     font-size: 12px;
   }
-  .chip-field {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    align-items: center;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 4px;
-    background: var(--panel);
-  }
-  .chip-field .chips {
-    gap: 4px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .chip-field input {
-    flex: 1;
-    min-width: 80px;
-    border: none;
-    background: transparent;
-    padding: 2px 4px;
-    outline: none;
-  }
-  .chip-field input:focus {
-    outline: none;
-  }
-  .inline-suggestions {
-    position: absolute;
-    margin-top: 2px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    box-shadow: 0 4px 14px var(--shadow);
-    z-index: 10;
-    max-height: 140px;
-    overflow: auto;
-    list-style: none;
-    padding: 2px;
-  }
-  .inline-suggestion {
-    width: 100%;
-    text-align: left;
-    border: none;
-    background: transparent;
-    border-radius: 4px;
-    padding: 4px 8px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-  }
-  .inline-suggestion:hover {
-    background: var(--drop);
-  }
-  .priority-chips {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-wrap: wrap;
-  }
-  .priority-chips .field-label {
-    display: inline-flex;
-    align-items: center;
-    color: var(--muted);
-  }
-  .priority-chips .chip {
-    cursor: pointer;
-  }
-  .priority-chips .chip.selected {
-    font-weight: 600;
-  }
   .rc-feedback {
     font-size: 12px;
     margin: -2px 0;
@@ -1084,6 +1026,11 @@
     flex-direction: column;
     gap: 6px;
     box-shadow: 0 4px 14px var(--shadow);
+  }
+  .label-picker.embedded {
+    margin-top: 0;
+    border-color: var(--line);
+    box-shadow: none;
   }
   .chips {
     display: flex;
@@ -1118,7 +1065,7 @@
     border: 1px solid var(--line);
     border-radius: 6px;
     background: var(--panel);
-    max-height: 140px;
+    max-height: 220px;
     overflow: auto;
   }
   .suggestion {
