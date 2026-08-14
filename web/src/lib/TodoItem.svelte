@@ -228,6 +228,9 @@
     if (e.key === 'Escape') {
       e.preventDefault();
       closeLabelPicker();
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      commitLabelQuery();
     }
   }
 
@@ -285,7 +288,7 @@
   }
 
   function onEditLabelKeydown(e) {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       if (editLabelSuggestions.length === 1) {
         addEditLabel(editLabelSuggestions[0].name);

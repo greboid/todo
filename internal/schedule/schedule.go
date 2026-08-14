@@ -673,10 +673,10 @@ func Parse(raw string, now time.Time) (Schedule, error) {
 // QuickAdd is the parsed result of a quick-add line: a title, any #label tags,
 // a single @priority, and an optional trailing schedule.
 type QuickAdd struct {
-	Title     string
-	Labels    []string
-	Priority  string
-	Schedule  Schedule
+	Title    string
+	Labels   []string
+	Priority string
+	Schedule Schedule
 }
 
 // Extract parses a quick-add line into a title, optional #label tags, and an

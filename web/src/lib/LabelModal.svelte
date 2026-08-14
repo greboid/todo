@@ -19,9 +19,9 @@
     }
   }
 
-  async function removePredefined(name) {
+  async function deleteLabel(name) {
     try {
-      await store.removePredefinedLabel(name);
+      await store.deleteLabel(name);
     } catch (e) {
       alert(e.message || String(e));
     }
@@ -66,7 +66,7 @@
   </form>
 
   <div class="hint">
-    Labels are case-insensitive. Colours are shared across all boards.
+    Labels are case-insensitive. Colours are shared across all boards. Deleting a label removes it from every todo.
   </div>
 
   {#if store.labels.length}
@@ -88,9 +88,9 @@
             <button
               type="button"
               class="ghost danger remove-btn"
-              onclick={() => removePredefined(lbl.name)}
-              aria-label="Remove label {lbl.name}"
-              title="Remove from predefined set"
+              onclick={() => deleteLabel(lbl.name)}
+              aria-label="Delete label {lbl.name}"
+              title="Delete label everywhere"
             >
               <Icon name="trash" size={14} />
             </button>

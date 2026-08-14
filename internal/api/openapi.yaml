@@ -284,6 +284,18 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Label" }
         "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [Labels]
+      operationId: deleteLabel
+      summary: Delete a label
+      description: >
+        Removes the label everywhere: detached from every todo, its colour
+        row deleted, and any predefined entry removed. Matching is
+        case-insensitive.
+      responses:
+        "204": { description: Deleted. No content. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/labels/predefined:
     post:
