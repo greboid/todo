@@ -610,6 +610,21 @@ func Parse(raw string, now time.Time) (Schedule, error) {
 	if text == "" {
 		return Schedule{}, nil
 	}
+	// "repeat" is accepted as a synonym for "every": it is trimmed, and the
+	// remainder is re-anchored on "every" unless it already uses the
+	// every-grammar ("repeat 2 weeks", "repeat! day", "repeat every week").
+	if loc := reRepeat.FindStringIndex(text); loc != nil {
+		head := strings.TrimSpace(text[loc[0]:loc[1]])
+		rest := strings.TrimSpace(text[loc[1]:])
+		if !reEvery.MatchString(rest) {
+			if strings.HasSuffix(head, "!") {
+				rest = "every! " + rest
+			} else {
+				rest = "every " + rest
+			}
+		}
+		text = rest
+	}
 	// Accept bare recurrence keywords ("daily", "weekly", ...) as shorthand
 	// for "every <keyword>", matching Todoist.
 	if reBareKeywords.MatchString(text) {
@@ -1141,6 +1156,7 @@ var (
 	reDuration     = regexp.MustCompile(`(\d+)\s*(day|days|week|weeks|month|months|year|years)`)
 	reClauseKW     = regexp.MustCompile(`\b(starting|from|ending|until|for)\b`)
 	reEvery        = regexp.MustCompile(`^(ev|every)(!)?(?:\s+|$)`)
+	reRepeat       = regexp.MustCompile(`^repeats?(?:!)?(?:\s+|$)`)
 	reBareKeywords = regexp.MustCompile(`^(daily|weekly|monthly|yearly|quarterly|fortnight|fortnightly|weekdays?|weekends?|workdays?)\b`)
 
 	reLabel    = regexp.MustCompile(`#([^\s#,]+)`)
