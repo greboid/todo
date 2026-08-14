@@ -49,7 +49,7 @@
       <button class="ghost tool-btn" onclick={() => (priorityModalOpen = true)} title="Manage priorities">
         <Icon name="flag" size={16} /><span class="tool-label">Priorities</span>
       </button>
-      <button class="ghost tool-btn" onclick={() => (helpModalOpen = true)} title="Filter syntax help">
+      <button class="ghost tool-btn" onclick={() => (helpModalOpen = true)} title="Filter and date syntax help">
         <Icon name="help" size={16} /><span class="tool-label">Help</span>
       </button>
     </div>
