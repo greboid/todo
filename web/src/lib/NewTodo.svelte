@@ -43,6 +43,26 @@
   });
   let canSubmit = $derived(text.trim().length > 0);
 
+  // Debounced blanking: feedback drops to null on every keystroke (the
+  // preview is stale) and comes back once the debounced server parse lands,
+  // which makes the line flicker. Keep showing the last value for a grace
+  // period instead; clear immediately when the text is emptied (submit,
+  // Escape) so the reset still feels instant.
+  const FEEDBACK_HOLD_MS = 2000;
+  let shownFeedback = $state(null);
+  $effect(() => {
+    if (feedback !== null) {
+      shownFeedback = feedback;
+      return;
+    }
+    if (!text.trim()) {
+      shownFeedback = null;
+      return;
+    }
+    const handle = setTimeout(() => (shownFeedback = null), FEEDBACK_HOLD_MS);
+    return () => clearTimeout(handle);
+  });
+
   // -- Label tab completion with popup --
   // After typing "#" and some characters, a dropdown lists matching labels.
   // Tab / ArrowDown cycles forward, Shift+Tab / ArrowUp cycles back; Enter or
@@ -227,8 +247,8 @@
     {/if}
   </div>
   <button type="submit" class="primary action-btn" disabled={!canSubmit}>Add</button>
-  {#if feedback}
-    <span class="preview">{feedback}</span>
+  {#if shownFeedback}
+    <span class="preview">{shownFeedback}</span>
   {/if}
 </form>
 
