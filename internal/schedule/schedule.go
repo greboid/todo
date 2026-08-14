@@ -266,8 +266,15 @@ func ParseDate(raw string, now time.Time) (string, bool) {
 	}
 
 	if m := reInN.FindStringSubmatch(s); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		return iso(addUnits(now, singularUnit(m[2]), n)), true
+		n := 1
+		if m[1] != "" {
+			n, _ = strconv.Atoi(m[1])
+		}
+		unit := singularUnit(m[3])
+		if unit == "fortnight" {
+			return iso(addUnits(now, "week", 2*n)), true
+		}
+		return iso(addUnits(now, unit, n)), true
 	}
 	if m := rePlusDays.FindStringSubmatch(s); m != nil {
 		n, _ := strconv.Atoi(m[1])
@@ -1121,7 +1128,7 @@ var (
 	reISO        = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})$`)
 	reSlash      = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$`)
 	reEndOf      = regexp.MustCompile(`^(?:end|last day) of (?:the\s+|this\s+)?(\w+)$`)
-	reInN        = regexp.MustCompile(`^in\s+(\d+)\s+(day|days|week|weeks|month|months|year|years)$`)
+	reInN        = regexp.MustCompile(`^in\s+(?:(\d+)|(a|an))\s+(day|days|week|weeks|month|months|year|years|fortnight|fortnights)$`)
 	rePlusDays   = regexp.MustCompile(`^\+?(\d+)\s*(?:days?)?$`)
 	reNextWord   = regexp.MustCompile(`^next\s+(\w+)$`)
 	reThisWord   = regexp.MustCompile(`^this\s+(\w+)$`)

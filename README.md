@@ -14,8 +14,8 @@ as one executable with no external dependencies and no accounts.
   to the root of the board.
 - **Labels** for lightweight tagging and filtering.
 - **Due dates** entered in plain English in a single field: `today`,
-  `tomorrow`, `aug 15`, `next monday`, `in 2 weeks`, `end of month`,
-  `this weekend`, and more.
+  `tomorrow`, `aug 15`, `next monday`, `in 2 weeks`, `in a fortnight`,
+  `end of month`, `this weekend`, and more.
 - **Recurring tasks** (Todoist-style): `every day`, `every 2 weeks on mon, wed`,
   `every month on the 15th`, `every last friday`, `every month on the last day
   starting sep 1 ending dec 31`. Completing a recurring todo automatically
