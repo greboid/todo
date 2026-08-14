@@ -51,6 +51,62 @@
   let priorityPickerOpen = $state(false);
   let activePriority = $state('');
 
+  // Right-click context menu duplicating the action buttons. Which todo owns
+  // the menu lives in the store (like editingId) so only one is ever open;
+  // this item renders the menu while it holds the slot.
+  let menuOpen = $derived(store.contextMenu?.todoId === todo.id);
+  let menuEl = $state(null);
+  let menuPos = $state({ left: 0, top: 0 });
+
+  function onContextMenu(e) {
+    // The edit form replaces the action row; let the browser serve its menu.
+    if (editing) return;
+    // Nested items each own their right-click; stop the event so ancestor
+    // items don't overwrite the menu with their own todo.
+    e.preventDefault();
+    e.stopPropagation();
+    menuPos = { left: e.clientX, top: e.clientY };
+    store.openContextMenu(todo.id, e.clientX, e.clientY);
+  }
+
+  // Clamp the fixed menu so it never leaves the viewport. Runs after render
+  // (menuEl is measurable) but before paint; menuPos was already seeded at
+  // the cursor so nothing is visible in the wrong place meanwhile.
+  $effect(() => {
+    if (!menuOpen || !menuEl || !store.contextMenu) return;
+    const rect = menuEl.getBoundingClientRect();
+    menuPos = {
+      left: Math.max(8, Math.min(store.contextMenu.x, window.innerWidth - rect.width - 8)),
+      top: Math.max(8, Math.min(store.contextMenu.y, window.innerHeight - rect.height - 8)),
+    };
+  });
+
+  function menuAction(fn) {
+    store.closeContextMenu();
+    fn();
+  }
+
+  function onWindowClick(e) {
+    if (!menuOpen) return;
+    if (menuEl?.contains(e.target)) return;
+    store.closeContextMenu();
+  }
+
+  function onWindowContextMenu() {
+    // A right-click that bubbles all the way to the window wasn't claimed by
+    // a todo item (items stopPropagation), so this menu should go away.
+    if (menuOpen) store.closeContextMenu();
+  }
+
+  function onWindowDismiss(e) {
+    if (!menuOpen) return;
+    if (e.key === 'Escape') store.closeContextMenu();
+  }
+
+  function onWindowScroll() {
+    if (menuOpen) store.closeContextMenu();
+  }
+
   // Drop target state for this row. Dragging is initiated from the drag
   // handle (which is its own draggable element); the row itself is never
   // draggable so clicks, text selection, and buttons always work. The row is
@@ -402,6 +458,13 @@
   );
 </script>
 
+<svelte:window
+  onclick={onWindowClick}
+  oncontextmenu={onWindowContextMenu}
+  onkeydown={onWindowDismiss}
+  onscroll={onWindowScroll}
+/>
+
 <div
   bind:this={rootEl}
   class={classes}
@@ -409,6 +472,7 @@
   tabindex="0"
   aria-selected={todo.completed}
   aria-expanded={children.length > 0}
+  oncontextmenu={onContextMenu}
   ondragover={onDragOver}
   ondragleave={onDragLeave}
   ondrop={resolveDrop}
@@ -657,6 +721,33 @@
 
   {#if addingChild}
     <NewTodo placeholder="Add a subtask…" onAdd={addChild} onCancel={() => (addingChild = false)} />
+  {/if}
+
+  {#if menuOpen}
+    <div
+      bind:this={menuEl}
+      class="context-menu"
+      role="menu"
+      aria-label="Todo actions"
+      style:left="{menuPos.left}px"
+      style:top="{menuPos.top}px"
+    >
+      <button type="button" role="menuitem" onclick={() => menuAction(startEdit)}>
+        <Icon name="edit" size={16} /> Edit
+      </button>
+      <button type="button" role="menuitem" onclick={() => menuAction(openLabelPicker)}>
+        <Icon name="tag" size={16} /> Labels
+      </button>
+      <button type="button" role="menuitem" onclick={() => menuAction(openPriorityPicker)}>
+        <Icon name="flag" size={16} /> Priority
+      </button>
+      <button type="button" role="menuitem" onclick={() => menuAction(() => (addingChild = !addingChild))}>
+        <Icon name="plus" size={16} /> Add child
+      </button>
+      <button type="button" role="menuitem" class="danger" onclick={() => menuAction(onDelete)}>
+        <Icon name="trash" size={16} /> Delete
+      </button>
+    </div>
   {/if}
 
   {#if children.length}
@@ -1024,5 +1115,37 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
+  }
+  .context-menu {
+    position: fixed;
+    z-index: 100;
+    min-width: 150px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px var(--shadow);
+  }
+  .context-menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    font-size: 13px;
+    text-align: left;
+  }
+  .context-menu button:hover {
+    background: var(--drop);
+    color: var(--accent-strong);
+  }
+  .context-menu button.danger:hover {
+    background: var(--danger-tint);
+    color: var(--danger);
   }
 </style>
