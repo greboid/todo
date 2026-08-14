@@ -80,7 +80,7 @@
       <dd>repeat on specific weekdays</dd>
       <dt><code>every month on the 15th</code> <code>every month on the last day</code> <code>every last friday</code></dt>
       <dd>monthly targets: day(s) of month, last day, or an ordinal weekday (first&hellip;last)</dd>
-      <dt><code>daily</code> <code>weekdays</code> <code>weekends</code> <code>quarterly</code> <code>fortnight</code></dt>
+      <dt><code>daily</code> <code>weekdays</code> <code>weekends</code> <code>quarterly</code> <code>fortnightly</code></dt>
       <dd>repeat shorthands</dd>
       <dt><code>every! week</code></dt>
       <dd><code>!</code> advances from the completion date instead of the due date</dd>

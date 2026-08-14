@@ -63,6 +63,7 @@ func TestParse(t *testing.T) {
 		// recurrence, bare-keyword shorthand
 		{"daily bare", "daily", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1})}, ""},
 		{"weekly bare", "weekly", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1})}, ""},
+		{"fortnightly bare", "fortnightly", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 2})}, ""},
 
 		// recurrence, explicit. A recurrence without a starting date seeds its
 		// first due date to the first occurrence on/after today (2026-08-09, a
@@ -127,6 +128,7 @@ func TestParse(t *testing.T) {
 		{"every hour", "every hour", Schedule{}, "times are not supported"},
 		{"at 3pm", "at 3pm", Schedule{}, "couldn't read a date"},
 		{"garbage", "notadate", Schedule{}, "couldn't read a date"},
+		{"bare fortnight rejected", "fortnight", Schedule{}, "couldn't read a date"},
 		{"day out of range", "every month on the 99th", Schedule{}, "day of month must be 1-31"},
 		{"bad qualifier", "every day on monday", Schedule{}, "does not apply to daily"},
 	}

@@ -38,6 +38,8 @@ func TestExtract(t *testing.T) {
 		{"month word in title", "review the march report", "review the march report", nil, "", false, "", 0, nil, nil},
 		{"bare schedule becomes title", "every day", "every day", nil, "", false, "", 0, nil, nil},
 		{"single date token becomes title", "tomorrow", "tomorrow", nil, "", false, "", 0, nil, nil},
+		{"fortnight date with title", "test in a fortnight", "test", nil, "2026-08-24", false, "", 0, nil, nil},
+		{"fortnight alone becomes title", "in a fortnight", "in a fortnight", nil, "", false, "", 0, nil, nil},
 		{"spacing collapsed", "buy   milk   tomorrow", "buy milk", nil, "2026-08-11", false, "", 0, nil, nil},
 		{"case preserved in title", "Buy Milk Tomorrow", "Buy Milk", nil, "2026-08-11", false, "", 0, nil, nil},
 	}
