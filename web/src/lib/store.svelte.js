@@ -64,6 +64,7 @@ function createStore() {
   let labels = $state([]);
   let priorities = $state([]);
   let boards = $state([]);
+  let savedSearches = $state([]);
   // Active board is the one currently shown. Persisted across reloads; falls
   // back to the first board if the stored id no longer exists. May also be set
   // from the URL (?board=<id>) which takes precedence over the stored value.
@@ -92,6 +93,18 @@ function createStore() {
 
   function persistFilter() {
     storage.set('todo:filter', filterText);
+  }
+
+  // Apply new filter text: persist it, mirror it into the URL, and re-fetch
+  // (debounced) so the server re-evaluates the list.
+  function applyFilterText(text) {
+    filterText = text;
+    persistFilter();
+    syncURL();
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      load();
+    }, 200);
   }
 
   // --- URL sync ---
@@ -239,14 +252,16 @@ function createStore() {
         activeBoardId = boardList[0]?.id ?? null;
         if (activeBoardId) storage.set('todo:activeBoard', String(activeBoardId));
       }
-      const [todoList, labelList, priorityList] = await Promise.all([
+      const [todoList, labelList, priorityList, searchList] = await Promise.all([
         api.listTodos(activeBoardId ?? undefined, filterText, todayISO()),
         api.listLabels(),
         api.listPriorities(),
+        api.listSavedSearches(),
       ]);
       todos = todoList ?? [];
       labels = labelList ?? [];
       priorities = priorityList ?? [];
+      savedSearches = searchList ?? [];
       filterError = '';
       syncURL();
     } catch (e) {
@@ -436,6 +451,26 @@ function createStore() {
     priorities = updated;
   }
 
+  // --- Saved searches ---
+  // Named filter queries kept server-side; applying one just sets the filter
+  // text (the server re-evaluates it on the next fetch).
+  async function createSavedSearch(name, query) {
+    const created = await api.createSavedSearch({ name, query });
+    savedSearches = [...savedSearches, created];
+    return created;
+  }
+
+  async function deleteSavedSearch(id) {
+    await api.deleteSavedSearch(id);
+    savedSearches = savedSearches.filter((s) => s.id !== id);
+  }
+
+  function applySavedSearch(id) {
+    const search = savedSearches.find((s) => s.id === id);
+    if (!search) return;
+    applyFilterText(search.query);
+  }
+
   return {
     get todos() {
       return todos;
@@ -454,6 +489,9 @@ function createStore() {
     },
     get boards() {
       return boards;
+    },
+    get savedSearches() {
+      return savedSearches;
     },
     get activeBoardId() {
       return activeBoardId;
@@ -480,14 +518,7 @@ function createStore() {
       return filterError;
     },
     setFilterText(text) {
-      filterText = text;
-      persistFilter();
-      syncURL();
-      // Debounce: typing fires one re-fetch after the user pauses.
-      clearTimeout(filterTimer);
-      filterTimer = setTimeout(() => {
-        load();
-      }, 200);
+      applyFilterText(text);
     },
     clearFilter() {
       filterText = '';
@@ -533,5 +564,8 @@ function createStore() {
     removePredefinedPriority,
     updatePriorityColor,
     reorderPriorities,
+    createSavedSearch,
+    deleteSavedSearch,
+    applySavedSearch,
   };
 }

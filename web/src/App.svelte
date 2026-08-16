@@ -9,6 +9,7 @@
   import Icon from './lib/Icon.svelte';
   import LabelModal from './lib/LabelModal.svelte';
   import PriorityModal from './lib/PriorityModal.svelte';
+  import SavedSearchMenu from './lib/SavedSearchMenu.svelte';
   import HelpModal from './lib/HelpModal.svelte';
   import ThemeToggle from './lib/ThemeToggle.svelte';
 
@@ -52,6 +53,7 @@
       <button class="ghost tool-btn" onclick={() => (priorityModalOpen = true)} title="Manage priorities">
         <Icon name="flag" size={16} /><span class="tool-label">Priorities</span>
       </button>
+      <SavedSearchMenu />
       <button class="ghost tool-btn" onclick={() => (helpModalOpen = true)} title="Filter and date syntax help">
         <Icon name="help" size={16} /><span class="tool-label">Help</span>
       </button>
