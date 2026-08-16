@@ -12,6 +12,8 @@
   import SavedSearchMenu from './lib/SavedSearchMenu.svelte';
   import HelpModal from './lib/HelpModal.svelte';
   import ThemeToggle from './lib/ThemeToggle.svelte';
+  import SyncStatus from './lib/SyncStatus.svelte';
+  import MergeDialog from './lib/MergeDialog.svelte';
 
   const roots = $derived(store.visibleChildrenOf(null));
 
@@ -43,6 +45,7 @@
     {#if store.loading}<span class="muted">Loading…</span>{/if}
     {#if store.error}<span class="error">{store.error}</span>{/if}
     <div class="toolbar">
+      <SyncStatus />
       <ThemeToggle />
       <button class="ghost tool-btn" onclick={() => (boardModalOpen = true)} title="Manage boards">
         <Icon name="board" size={16} /><span class="tool-label">Boards</span>
@@ -120,6 +123,9 @@
 {#if helpModalOpen}
   <HelpModal onClose={() => (helpModalOpen = false)} />
 {/if}
+<!-- Rendered whenever the offline flush is paused on a clash; resolution
+     unblocks the queue. -->
+<MergeDialog />
 
 <style>
   header {

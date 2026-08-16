@@ -222,6 +222,19 @@
     try {
       parsed = await api.parseSchedule(draftSchedule);
     } catch (e) {
+      if (e.status === undefined) {
+        // Offline: keep the edit queued with the raw schedule text; the
+        // server re-parses it when the change replays. An empty field just
+        // clears both fields.
+        if (draftSchedule.trim()) patch.rawSchedule = draftSchedule;
+        else {
+          patch.dueDate = null;
+          patch.recurrence = null;
+        }
+        await store.update(todo.id, patch);
+        store.endEdit();
+        return;
+      }
       parsed = { ok: false, error: e.message };
     }
     if (!parsed.ok) {
@@ -255,13 +268,18 @@
     }
     const seq = ++parseSeq;
     const handle = setTimeout(async () => {
-      const res = await api.parseSchedule(text).catch((e) => ({ ok: false, error: e.message }));
+      const res = await api.parseSchedule(text).catch((e) =>
+        e.status === undefined ? { ok: null } : { ok: false, error: e.message },
+      );
       if (seq === parseSeq) parseResult = { ...res, src: text };
     }, 250);
     return () => clearTimeout(handle);
   });
   let scheduleFeedback = $derived.by(() => {
     if (!draftSchedule.trim() || !parseResult || parseResult.src !== draftSchedule) return null;
+    // ok == null means the parse could not run (offline, unseen text): show
+    // no verdict rather than a misleading error.
+    if (parseResult.ok == null) return null;
     return parseResult.ok
       ? { ok: true, text: parseResult.scheduleText }
       : { ok: false, text: parseResult.error };
@@ -462,7 +480,7 @@
   }
 
   let classes = $derived(
-    `item ${todo.completed ? 'done' : ''} ${dropZone ? `drop drop-${dropZone}` : ''} ${expanded ? 'expanded' : ''}`,
+    `item ${todo.completed ? 'done' : ''} ${dropZone ? `drop drop-${dropZone}` : ''} ${expanded ? 'expanded' : ''} ${todo.pending ? 'pending' : ''}`,
   );
 </script>
 
@@ -839,6 +857,11 @@
   .item.drop-into {
     background: var(--drop);
     border-color: var(--accent);
+  }
+  /* Queued offline change: the server hasn't confirmed it yet. */
+  .item.pending {
+    border-style: dashed;
+    border-color: var(--muted);
   }
   .head {
     display: flex;

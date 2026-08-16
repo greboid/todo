@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2F8BFF"/>
+      <stop offset="1" stop-color="#1268E8"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4BDD6D"/>
+      <stop offset="1" stop-color="#19BE52"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-opacity=".18"/>
+    </filter>
+  </defs>
+
+  <!-- Maskable launcher icon: full-bleed background with every meaningful
+       element inside the central 80% safe zone, so launcher masks (circle,
+       squircle, rounded square) never clip the art. Rasterised with
+       rsvg-convert into web/static/icons/maskable-{192,512}.png. -->
+  <rect width="256" height="256" fill="url(#blue)"/>
+
+  <!-- Notepad (same art as icon.svg minus the round badge) -->
+  <g filter="url(#shadow)">
+    <rect x="58" y="54" width="140" height="164" rx="22" fill="#fff"/>
+
+    <!-- Binder loops -->
+    <g fill="#183B78">
+      <rect x="84" y="42" width="18" height="30" rx="9"/>
+      <rect x="119" y="42" width="18" height="30" rx="9"/>
+      <rect x="154" y="42" width="18" height="30" rx="9"/>
+    </g>
+
+    <!-- Checklist rows -->
+    <g>
+      <rect x="75" y="88" width="30" height="30" rx="8" fill="#237CF0"/>
+      <path d="M82 103l7 7 13-15" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <rect x="75" y="124" width="30" height="30" rx="8" fill="#237CF0"/>
+      <path d="M82 139l7 7 13-15" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <rect x="75" y="160" width="30" height="30" rx="8" fill="#D3D9E3"/>
+      <rect x="81" y="166" width="18" height="18" rx="4" fill="#fff"/>
+
+      <g fill="#AEB8C8">
+        <rect x="113" y="95" width="73" height="8" rx="4"/>
+        <rect x="113" y="131" width="73" height="8" rx="4"/>
+        <rect x="113" y="167" width="73" height="8" rx="4"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Completion badge -->
+  <g filter="url(#shadow)">
+    <circle cx="181" cy="187" r="36" fill="url(#green)"/>
+    <path d="M163 187l12 12 24-27"
+          fill="none" stroke="#fff" stroke-width="9"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

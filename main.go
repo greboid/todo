@@ -47,7 +47,13 @@ func run() error {
 
 	mux := http.NewServeMux()
 	handler := api.New(store, *apiKey)
-	mux.Handle("/api/", handler.Routes())
+	// /api reads are never cached by the browser: the service worker keeps
+	// its own "last good sync" copy, and an intervening HTTP-cache entry
+	// would shadow it. The worker, manifest, and document are revalidated
+	// every time (no-cache) so updates land instead of sticking in caches.
+	mux.Handle("/api/", noStore(handler.Routes()))
+	mux.HandleFunc("GET /sw.js", serveArtifact(ui.FS(), "sw.js", "application/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /manifest.webmanifest", serveArtifact(ui.FS(), "manifest.webmanifest", "application/manifest+json; charset=utf-8"))
 	mux.Handle("/", spaHandler(ui.FS(), handler.MintSession))
 
 	srv := &http.Server{
@@ -81,6 +87,31 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// noStore pins Cache-Control: no-store on API responses so the browser never
+// serves a stale HTTP-cache entry where the service worker expects to see the
+// network's answer (and cache the last good one itself).
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// serveArtifact serves a build artifact that must revalidate on every fetch:
+// the service worker and manifest only update when the browser actually sees
+// the new bytes, so explicit content types and no opaque caching.
+func serveArtifact(root fs.FS, name, contentType string) http.HandlerFunc {
+	body, err := fs.ReadFile(root, name)
+	if err != nil {
+		panic(fmt.Sprintf("ui: read %s: %v", name, err))
+	}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(body)
+	}
+}
+
 // spaHandler serves static assets from root. Unknown GET paths fall back to
 // index.html so client-side routing works. Serving the document mints a
 // browser session via mintSession (when an API key is configured), so the
@@ -108,6 +139,7 @@ func spaHandler(root fs.FS, mintSession func(http.ResponseWriter)) http.Handler 
 			mintSession(w)
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(index)
 	})
 }
