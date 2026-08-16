@@ -127,6 +127,12 @@ function row(page, title) {
   return page.locator('.item').filter({ has: page.locator('.title', { hasText: title }) }).first();
 }
 
+// The item's own checkbox: children are nested inside the parent's DOM, so a
+// plain descendant lookup would match theirs too.
+function checkbox(page, title) {
+  return row(page, title).locator(':scope > .head > input[type=checkbox]');
+}
+
 async function editTitle(page, from, to) {
   await row(page, from).locator('.title').dblclick();
   // While editing, the row's title span is replaced by the form, so scope to
@@ -221,6 +227,85 @@ async function main() {
       check('queued create reached the server', !!created);
       check('queued completion reached the server', !!existing?.completed);
       check('badge clears after sync', (await badgeText(page)) === null);
+    }
+
+    // ============ 2b. incoming server-side changes pull on reconnect ============
+    {
+      await addTodo(page, 'Remote edit');
+      await until(() => row(page, 'Remote edit').isVisible(), { what: 'remote target visible' });
+
+      await server.stop();
+      // A local change queues offline (must be pushed on reconnect)…
+      await editTitle(page, 'Remote edit', 'Local rename');
+      await until(() => row(page, 'Local rename').isVisible(), { what: 'offline rename projected' });
+
+      // …while "another client" — a second server on the same database —
+      // completes the todo server-side. Two servers never run concurrently,
+      // so the shared SQLite file is never contended.
+      const other = new Server(bin, root, server.port + 1, server.dbPath);
+      await other.start();
+      const remote = (await apiListTodos(other.base)).find((t) => t.title === 'Remote edit');
+      const done = await fetch(`${other.base}/api/todos/${remote.id}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: true }),
+      });
+      if (!done.ok) throw new Error('other-client complete failed');
+      await other.stop();
+
+      await server.start();
+      // Reconnect (the OS-level online event): push the queue, then pull the
+      // server's state — the other client's completion must appear in the
+      // already-open page without any manual refresh.
+      await page.evaluate(() => window.dispatchEvent(new Event('online')));
+      await until(async () => await row(page, 'Local rename').locator('input[type=checkbox]').isChecked(), {
+        what: 'server-side completion pulled on reconnect',
+        timeout: 15000,
+      });
+      check('incoming changes sync on reconnect without a refresh', true);
+      check('queued change pushed and confirmed', await row(page, 'Local rename').evaluate((el) => !el.classList.contains('pending')));
+    }
+
+    // ============ 2c. agreeing values must not raise the merge dialog ============
+    {
+      // Complete a parent and its child offline in this client. The parent's
+      // replay cascades completion to the child server-side, so when the
+      // child's own intent is checked the server already agrees with it —
+      // identical values ("done" vs "done") must NOT open the merge dialog.
+      await addTodo(page, 'Cascade parent');
+      await until(() => row(page, 'Cascade parent').isVisible(), { what: 'cascade parent visible' });
+      await row(page, 'Cascade parent').getByRole('button', { name: 'Add child' }).click();
+      await page.fill('input[placeholder="Add a subtask…"]', 'Cascade child');
+      await page.press('input[placeholder="Add a subtask…"]', 'Enter');
+      await until(() => row(page, 'Cascade child').isVisible(), { what: 'cascade child visible' });
+
+      await server.stop();
+      await checkbox(page, 'Cascade parent').check();
+      await until(async () => await row(page, 'Cascade parent').evaluate((el) => el.classList.contains('pending')), {
+        what: 'parent complete queued',
+      });
+      await checkbox(page, 'Cascade child').check();
+      await until(async () => await row(page, 'Cascade child').evaluate((el) => el.classList.contains('pending')), {
+        what: 'child complete queued',
+      });
+
+      await server.start();
+      await nudgeSync(page);
+      await until(async () => {
+        const parent = row(page, 'Cascade parent');
+        const child = row(page, 'Cascade child');
+        return (
+          !(await parent.evaluate((el) => el.classList.contains('pending'))) &&
+          !(await child.evaluate((el) => el.classList.contains('pending')))
+        );
+      }, { what: 'cascade completions synced' });
+      const dialog = page.locator('.modal[role=dialog]');
+      check('no merge dialog when values already agree', !(await dialog.isVisible().catch(() => false)));
+      const list = await apiListTodos(server.base);
+      const parent = list.find((t) => t.title === 'Cascade parent');
+      const child = list.find((t) => t.title === 'Cascade child');
+      check('cascade completions both landed', !!parent?.completed && !!child?.completed);
+      check('badge clears without a dialog', (await badgeText(page)) === null);
     }
 
     // ============ 3. wedged navigator.onLine ============

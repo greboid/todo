@@ -249,12 +249,17 @@ function createStore() {
 
   // (Re)fetch boards, the filtered todo list for the active board, and labels.
   // A 400 means the filter is invalid: surface it as filterError and keep the
-  // last good list rather than clearing it.
+  // last good list rather than clearing it. Reconnect pulls can race
+  // user-triggered loads, so a response only lands if no newer load has
+  // started since (loadSeq discards the stale one).
+  let loadSeq = 0;
   async function load() {
+    const seq = ++loadSeq;
     loading = true;
     error = null;
     try {
       const boardList = (await api.listBoards()) ?? [];
+      if (seq !== loadSeq) return;
       boards = boardList;
       if (!activeBoardId || !boardList.some((b) => b.id === activeBoardId)) {
         activeBoardId = boardList[0]?.id ?? null;
@@ -266,6 +271,7 @@ function createStore() {
         api.listPriorities(),
         api.listSavedSearches(),
       ]);
+      if (seq !== loadSeq) return;
       serverTodos = todoList ?? [];
       labels = labelList ?? [];
       priorities = priorityList ?? [];
@@ -274,13 +280,14 @@ function createStore() {
       reproject();
       syncURL();
     } catch (e) {
+      if (seq !== loadSeq) return;
       if (e.status === 400) {
         filterError = e.message;
       } else {
         error = e.message;
       }
     } finally {
-      loading = false;
+      if (seq === loadSeq) loading = false;
     }
   }
 
