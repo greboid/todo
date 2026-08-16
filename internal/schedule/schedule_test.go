@@ -60,6 +60,18 @@ func TestParse(t *testing.T) {
 		{"end of aug", "end of aug", Schedule{DueDate: "2026-08-31"}, ""},
 		{"this weekend", "this weekend", Schedule{DueDate: "2026-08-15"}, ""},
 
+		// "a <span> <day>" relative dates: coming anchor day plus the span
+		// (now is a Sunday, so the coming Monday is 08-10).
+		{"a week on monday", "a week on monday", Schedule{DueDate: "2026-08-17"}, ""},
+		{"a week monday", "a week monday", Schedule{DueDate: "2026-08-17"}, ""},
+		{"a week on sun", "a week on sun", Schedule{DueDate: "2026-08-16"}, ""},
+		{"a week tomorrow", "a week tomorrow", Schedule{DueDate: "2026-08-17"}, ""},
+		{"a week today", "a week today", Schedule{DueDate: "2026-08-16"}, ""},
+		{"a week yesterday", "a week yesterday", Schedule{DueDate: "2026-08-01"}, ""},
+		{"a fortnight on friday", "a fortnight on friday", Schedule{DueDate: "2026-08-28"}, ""},
+		{"a fortnight saturday", "a fortnight saturday", Schedule{DueDate: "2026-08-29"}, ""},
+		{"a week on banana", "a week on banana", Schedule{}, "couldn't read a date"},
+
 		// recurrence, bare-keyword shorthand
 		{"daily bare", "daily", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "daily", Interval: 1})}, ""},
 		{"weekly bare", "weekly", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1})}, ""},

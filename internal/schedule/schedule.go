@@ -188,6 +188,29 @@ func lastDayOfMonthNamed(ref time.Time, mon time.Month) time.Time {
 	return d
 }
 
+// spannedDay resolves the British "a <span> <day>" family: "a week on
+// monday", "a fortnight friday", "a week tomorrow". The anchor day is the
+// coming occurrence of that weekday (or today/tomorrow/yesterday) shifted by
+// the span, so on Sunday "a week on monday" is the Monday after next (8 days).
+// "yesterday" anchors are the only backward-looking form: "a week yesterday"
+// is yesterday minus the span.
+func spannedDay(weeks int, anchor string, now time.Time) (time.Time, bool) {
+	shift := 7 * weeks
+	switch anchor {
+	case "today":
+		return now.AddDate(0, 0, shift), true
+	case "tomorrow", "tom", "tmr":
+		return now.AddDate(0, 0, shift+1), true
+	case "yesterday":
+		return now.AddDate(0, 0, -(shift + 1)), true
+	}
+	if wd, ok := lookupWeekday(anchor); ok {
+		delta := (wd - int(now.Weekday()) + 7) % 7
+		return now.AddDate(0, 0, delta+shift), true
+	}
+	return time.Time{}, false
+}
+
 func singularUnit(tok string) string {
 	if strings.HasSuffix(tok, "s") {
 		return strings.TrimSuffix(tok, "s")
@@ -279,6 +302,16 @@ func ParseDate(raw string, now time.Time) (string, bool) {
 	if m := rePlusDays.FindStringSubmatch(s); m != nil {
 		n, _ := strconv.Atoi(m[1])
 		return iso(addUnits(now, "day", n)), true
+	}
+
+	if m := reAUnitDay.FindStringSubmatch(s); m != nil {
+		weeks := 1
+		if singularUnit(m[1]) == "fortnight" {
+			weeks = 2
+		}
+		if d, ok := spannedDay(weeks, m[2], now); ok {
+			return iso(d), true
+		}
 	}
 
 	if m := reNextWord.FindStringSubmatch(s); m != nil {
@@ -1132,6 +1165,7 @@ var (
 	reSlash      = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$`)
 	reEndOf      = regexp.MustCompile(`^(?:end|last day) of (?:the\s+|this\s+)?(\w+)$`)
 	reInN        = regexp.MustCompile(`^in\s+(?:(\d+)|(a|an))\s+(day|days|week|weeks|month|months|year|years|fortnight|fortnights)$`)
+	reAUnitDay   = regexp.MustCompile(`^an?\s+(week|weeks|fortnight|fortnights)\s+(?:on\s+)?(\w+)$`)
 	rePlusDays   = regexp.MustCompile(`^\+?(\d+)\s*(?:days?)?$`)
 	reNextWord   = regexp.MustCompile(`^next\s+(\w+)$`)
 	reThisWord   = regexp.MustCompile(`^this\s+(\w+)$`)
