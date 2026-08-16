@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -28,6 +29,9 @@ func main() {
 }
 
 func run() error {
+	apiKey := flag.String("api-key", "", "optional API key guarding /api; requests must send it as an X-API-Key header or a Bearer token (empty disables authentication)")
+	flag.Parse()
+
 	addr := envOr("TODO_ADDR", ":8080")
 	driver := envOr("TODO_DB_DRIVER", "sqlite")
 	dsn := envOr("TODO_DB", "todo.db")
@@ -42,8 +46,9 @@ func run() error {
 	defer func() { _ = store.Close() }()
 
 	mux := http.NewServeMux()
-	mux.Handle("/api/", api.New(store).Routes())
-	mux.Handle("/", spaHandler(ui.FS()))
+	handler := api.New(store, *apiKey)
+	mux.Handle("/api/", handler.Routes())
+	mux.Handle("/", spaHandler(ui.FS(), handler.MintSession))
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -62,7 +67,7 @@ func run() error {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	slog.Info("todo listening", "addr", addr, "driver", driver, "db", dsn)
+	slog.Info("todo listening", "addr", addr, "driver", driver, "db", dsn, "api-key", *apiKey != "")
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -77,8 +82,10 @@ func envOr(key, fallback string) string {
 }
 
 // spaHandler serves static assets from root. Unknown GET paths fall back to
-// index.html so client-side routing works.
-func spaHandler(root fs.FS) http.Handler {
+// index.html so client-side routing works. Serving the document mints a
+// browser session via mintSession (when an API key is configured), so the
+// SPA can call the guarded API without ever knowing the key.
+func spaHandler(root fs.FS, mintSession func(http.ResponseWriter)) http.Handler {
 	files := http.FileServerFS(root)
 	index, err := fs.ReadFile(root, "index.html")
 	if err != nil {
@@ -97,6 +104,9 @@ func spaHandler(root fs.FS) http.Handler {
 			}
 		}
 		// Not a real file: serve index.html for client-side routing.
+		if mintSession != nil {
+			mintSession(w)
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(index)
 	})

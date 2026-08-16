@@ -13,6 +13,13 @@ info:
     All responses use JSON. Error bodies have the shape `{"error": "<message>"}`.
     List endpoints never return `null` for an array — an empty collection is
     serialized as `[]`. Request bodies are capped at 1 MiB.
+
+    Authentication is optional: when the server is started with the
+    `-api-key` flag, requests must authenticate (see ApiKeyAuth); without the
+    flag the API is open. Browsers are handled specially: loading the SPA
+    document mints a short-lived `todo_session` cookie (HttpOnly, sliding
+    expiry, re-issued on every authenticated request) that is accepted in
+    place of the key, so the UI works without ever seeing it.
 servers:
   - url: /
     description: Relative to the server host (default listen address :8080).
@@ -29,6 +36,9 @@ tags:
     description: Named filter queries that can be re-applied from the toolbar.
   - name: Schedule
     description: Free-text due-date/recurrence parsing.
+
+security:
+  - ApiKeyAuth: []
 
 paths:
   /api/todos:
@@ -594,6 +604,23 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid API key (only when the server runs with `-api-key`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        Key passed to the server's `-api-key` flag. Optional: when the flag is
+        unset the API is open and this scheme is ignored. The key may also be
+        sent as `Authorization: Bearer <key>`. Browsers don't use this scheme:
+        they hold a short-lived `todo_session` cookie (see the description
+        above), which the guard accepts interchangeably.
 
   schemas:
     Error:
