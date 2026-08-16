@@ -2,6 +2,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -95,16 +96,26 @@ var swaggerPageTpl = template.Must(template.New("swagger").Parse(`<!DOCTYPE html
 
 // Handler wires the todo HTTP routes. It holds no per-request state.
 type Handler struct {
-	store *db.DB
+	store   *db.DB
+	apiKey  string
+	sessKey []byte
 }
 
-// New returns a configured Handler.
-func New(store *db.DB) *Handler { return &Handler{store: store} }
+// New returns a configured Handler. apiKey is optional: when empty the API is
+// open; when set, requests must present the key (header) or a browser
+// session cookie (see session.go).
+func New(store *db.DB, apiKey string) *Handler {
+	h := &Handler{store: store, apiKey: apiKey}
+	if apiKey != "" {
+		h.sessKey = sessionKey(apiKey)
+	}
+	return h
+}
 
-// Routes returns an http.ServeMux with all API routes registered under /api.
-// Uses Go 1.22+ method+path patterns so path parameters are available via
-// r.PathValue.
-func (h *Handler) Routes() *http.ServeMux {
+// Routes returns the API routes registered under /api, wrapped in the
+// optional API-key guard. Uses Go 1.22+ method+path patterns so path
+// parameters are available via r.PathValue.
+func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/todos", h.listTodos)
 	mux.HandleFunc("POST /api/todos", h.createTodo)
@@ -139,7 +150,40 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/swagger", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/swagger/", http.StatusMovedPermanently)
 	})
-	return mux
+	return h.requireAPIKey(mux)
+}
+
+// requireAPIKey wraps next so that, when a key is configured, requests must
+// present it — either in an X-API-Key header, as the Bearer token of the
+// Authorization header, or as a valid browser session cookie (minted with
+// the SPA document; see session.go). With no key configured (the default) it
+// is a no-op and the API stays open. Key comparison is constant-time.
+func (h *Handler) requireAPIKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.apiKey == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		presented := r.Header.Get("X-API-Key")
+		if presented == "" {
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				presented = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+		if presented != "" {
+			if subtle.ConstantTimeCompare([]byte(presented), []byte(h.apiKey)) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
+		} else if h.validSession(r) {
+			// Sliding expiration: re-mint so active tabs outlive sessionTTL.
+			h.MintSession(w)
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="todo api"`)
+		writeErr(w, http.StatusUnauthorized, errors.New("missing or invalid API key"))
+	})
 }
 
 func (h *Handler) listTodos(w http.ResponseWriter, r *http.Request) {
