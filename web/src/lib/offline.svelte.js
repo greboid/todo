@@ -178,6 +178,16 @@ function desiredValue(intent, key) {
   }
 }
 
+// The server snapshot's value for a field, normalised into the same shape
+// desiredValue produces — labels are an array in the snapshot but a joined
+// string in desiredValue, so comparing them directly would always look
+// different and flag a conflict even when the server already holds the
+// outcome this intent would write.
+function serverValue(server, key) {
+  if (key === 'labels') return [...(server[key] ?? [])].sort().join('\u0000');
+  return server[key];
+}
+
 function fieldChanged(base, server, key) {
   const a = base[key];
   const b = server[key];
@@ -261,7 +271,7 @@ function detectClash(intent, server) {
     // (the same edit made from another client) is not a conflict: the
     // outcome is identical either way. Only fields that would end up
     // different are worth a dialog.
-    keys = keys.filter((k) => desiredValue(intent, k) !== server[k]);
+    keys = keys.filter((k) => desiredValue(intent, k) !== serverValue(server, k));
   } else if (intent.kind === 'complete') {
     // Same reasoning: another client completing the same todo (or the
     // server's completion cascade from a parent replayed earlier in this
@@ -595,7 +605,10 @@ async function flushNow() {
           continue;
         }
         if (server !== undefined) {
-          const clash = detectClash(intent, server);
+          // keepMine: the user already chose "keep my changes" for this
+          // intent (a previous replay attempt was interrupted), so the
+          // decision sticks instead of re-opening the dialog on retry.
+          const clash = intent.keepMine ? null : detectClash(intent, server);
           if (clash) {
             conflict = clash;
             reviewDeferred = false;
@@ -605,10 +618,19 @@ async function flushNow() {
             // position.
             if (!queued.includes(intent)) continue;
             if (choice === 'later') break; // keep queued; badge shows the block
-            consume(intent);
-            reproject();
-            if (choice === 'theirs') continue; // server version wins: drop ours
-            // 'mine': fall through and replay on top of the server's version.
+            if (choice === 'theirs') {
+              // Server version wins: drop ours.
+              consume(intent);
+              reproject();
+              continue;
+            }
+            // 'mine': remember the decision and fall through to replay on
+            // top of the server's version. The intent is only consumed by
+            // the replay itself landing (or being rejected by the server) —
+            // a network failure mid-flush keeps it queued for the next
+            // attempt instead of silently dropping the change.
+            intent.keepMine = true;
+            persistQueue();
           } else if (intent.kind === 'complete' && server != null && !!server.completed === !!intent.completed) {
             // The server already holds this outcome (the same completion made
             // from another client, or the cascade from a parent completed
@@ -650,8 +672,13 @@ async function flushNow() {
   if (changed) {
     report = null;
     reviewDeferred = false;
-    reproject();
+    // Pull first, reproject second: a successful reload already reflects
+    // everything just replayed, so the optimistic view is replaced directly
+    // by the authoritative one. Reprojecting first would render the stale
+    // pre-replay serverTodos — a resolved "keep mine" merge visibly
+    // reverting to the server's old value until the reload lands.
     await hooks.reload?.();
+    reproject();
   }
   if (notes.length) report = notes.join('\n');
   if (queued.length && !reviewDeferred) scheduleRetry();

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -74,7 +75,7 @@ func TestRequireAPIKeySession(t *testing.T) {
 	}
 
 	minted := httptest.NewRecorder()
-	h.MintSession(minted)
+	h.MintSession(minted, httptest.NewRequest(http.MethodGet, "/", nil))
 	mintedCookie := cookieValue(minted)
 
 	tests := []struct {
@@ -115,4 +116,52 @@ func TestRequireAPIKeySession(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("no key configured: status = %d, want 200", rec.Code)
 	}
+}
+
+func TestMintSessionSecure(t *testing.T) {
+	h := New(nil, "secret")
+	mint := func(req *http.Request) string {
+		rec := httptest.NewRecorder()
+		h.MintSession(rec, req)
+		return rec.Header().Get("Set-Cookie")
+	}
+
+	tests := []struct {
+		name string
+		req  *http.Request
+		want bool
+	}{
+		{"plain http", httptest.NewRequest(http.MethodGet, "/", nil), false},
+		{
+			"proxied https",
+			withHeader(httptest.NewRequest(http.MethodGet, "/", nil), "X-Forwarded-Proto", "https"),
+			true,
+		},
+		{
+			"chained proxy list",
+			withHeader(httptest.NewRequest(http.MethodGet, "/", nil), "X-Forwarded-Proto", "https, http"),
+			true,
+		},
+		{
+			"proxied http",
+			withHeader(httptest.NewRequest(http.MethodGet, "/", nil), "X-Forwarded-Proto", "http"),
+			false,
+		},
+		{"direct tls", withTLS(httptest.NewRequest(http.MethodGet, "/", nil)), true},
+	}
+	for _, tt := range tests {
+		if got := strings.Contains(mint(tt.req), "; Secure"); got != tt.want {
+			t.Errorf("%s: cookie Secure = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func withHeader(req *http.Request, key, value string) *http.Request {
+	req.Header.Set(key, value)
+	return req
+}
+
+func withTLS(req *http.Request) *http.Request {
+	req.TLS = &tls.ConnectionState{}
+	return req
 }

@@ -67,8 +67,11 @@ func sessionSig(key []byte, exp string) []byte {
 // MintSession sets a fresh session cookie when an API key is configured; a
 // no-op otherwise. main wires it into the SPA handler so loading the UI
 // document bootstraps a session, and requireAPIKey calls it again on every
-// session-authenticated request for the sliding refresh.
-func (h *Handler) MintSession(w http.ResponseWriter) {
+// session-authenticated request for the sliding refresh. The cookie is
+// marked Secure when the request arrived over TLS or through a reverse
+// proxy that advertises HTTPS, so plain-HTTP LAN deployments keep working
+// while TLS ones get the hardened flag.
+func (h *Handler) MintSession(w http.ResponseWriter, r *http.Request) {
 	if h.sessKey == nil {
 		return
 	}
@@ -77,8 +80,20 @@ func (h *Handler) MintSession(w http.ResponseWriter) {
 		Value:    mintSessionToken(h.sessKey, time.Now()),
 		Path:     "/api",
 		HttpOnly: true,
+		Secure:   requestIsSecure(r),
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+// requestIsSecure reports whether the request reached this server over TLS,
+// directly or via a proxy that forwarded the original protocol. A
+// comma-separated X-Forwarded-Proto (chained proxies) takes its first entry.
+func requestIsSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	return strings.EqualFold(strings.TrimSpace(proto), "https")
 }
 
 // validSession reports whether the request carries an unexpired session

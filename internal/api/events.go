@@ -67,6 +67,21 @@ func (b *eventBus) unsubscribe(ch chan struct{}) {
 	b.mu.Unlock()
 }
 
+// close shuts the bus down: every subscriber's channel is closed, which
+// streamEvents observes and treats as end-of-stream, so in-flight event
+// requests finish and a graceful server shutdown is not held up by idle
+// SSE clients. Idempotent, and safe against concurrent subscribe/broadcast
+// (all three share the mutex, and closed channels are removed from the map
+// before anyone can send on them).
+func (b *eventBus) close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for ch := range b.subs {
+		close(ch)
+		delete(b.subs, ch)
+	}
+}
+
 // broadcast pokes every client. Non-blocking: a client that has not drained
 // its previous poke keeps it (pokes coalesce), and nothing written here can
 // stall a request handler.
@@ -108,7 +123,12 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ch:
+		case _, ok := <-ch:
+			// A closed channel is the bus shutting down (server stopping):
+			// end the stream so Shutdown is not held waiting on it.
+			if !ok {
+				return
+			}
 			if _, err := fmt.Fprint(w, "event: sync\ndata: {}\n\n"); err != nil {
 				return
 			}
@@ -146,8 +166,8 @@ func (h *Handler) notifyMutations(next http.Handler) http.Handler {
 }
 
 // statusRecorder captures the status code written by the wrapped handler so
-// notifyMutations can poke only on success. Flush and Hijack (needed by the
-// SSE stream and future upgrades) pass through.
+// notifyMutations can poke only on success. Flush (needed by the SSE stream)
+// passes through.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int

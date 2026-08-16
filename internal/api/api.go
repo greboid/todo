@@ -159,6 +159,14 @@ func (h *Handler) Routes() http.Handler {
 	return h.requireAPIKey(h.notifyMutations(mux))
 }
 
+// Close tears down the handler's shared infrastructure: it ends every open
+// SSE stream so a graceful server shutdown settles immediately instead of
+// idling out its deadline on long-lived event connections. Call once, when
+// the server is shutting down.
+func (h *Handler) Close() {
+	h.bus.close()
+}
+
 // requireAPIKey wraps next so that, when a key is configured, requests must
 // present it — either in an X-API-Key header, as the Bearer token of the
 // Authorization header, or as a valid browser session cookie (minted with
@@ -183,7 +191,7 @@ func (h *Handler) requireAPIKey(next http.Handler) http.Handler {
 			}
 		} else if h.validSession(r) {
 			// Sliding expiration: re-mint so active tabs outlive sessionTTL.
-			h.MintSession(w)
+			h.MintSession(w, r)
 			next.ServeHTTP(w, r)
 			return
 		}

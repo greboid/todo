@@ -68,6 +68,10 @@ func run() error {
 	// deadline instead of the already-cancelled signal context.
 	go func() {
 		<-ctx.Done()
+		// End open SSE streams first: Shutdown waits for active requests,
+		// and the event streams are the only long-lived ones — without this
+		// every shutdown idles out its full grace period on idle tabs.
+		handler.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
@@ -116,7 +120,7 @@ func serveArtifact(root fs.FS, name, contentType string) http.HandlerFunc {
 // index.html so client-side routing works. Serving the document mints a
 // browser session via mintSession (when an API key is configured), so the
 // SPA can call the guarded API without ever knowing the key.
-func spaHandler(root fs.FS, mintSession func(http.ResponseWriter)) http.Handler {
+func spaHandler(root fs.FS, mintSession func(http.ResponseWriter, *http.Request)) http.Handler {
 	files := http.FileServerFS(root)
 	index, err := fs.ReadFile(root, "index.html")
 	if err != nil {
@@ -136,7 +140,7 @@ func spaHandler(root fs.FS, mintSession func(http.ResponseWriter)) http.Handler 
 		}
 		// Not a real file: serve index.html for client-side routing.
 		if mintSession != nil {
-			mintSession(w)
+			mintSession(w, r)
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
