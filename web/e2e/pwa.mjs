@@ -20,6 +20,8 @@
 //      interaction at all, and the stream survives a server restart
 //   7. two tabs share the live sync: both see the same poke, and neither
 //      accumulates aborted event-stream requests
+//   8. lapsed session: a fatally rejected event stream reloads the page
+//      (simulated by rotating the API key, which invalidates sessions)
 
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -57,11 +59,12 @@ async function until(fn, { timeout = 10000, interval = 100, what = 'condition' }
 }
 
 class Server {
-  constructor(bin, cwd, port, dbPath) {
+  constructor(bin, cwd, port, dbPath, apiKey = '') {
     this.bin = bin;
     this.cwd = cwd;
     this.port = port;
     this.dbPath = dbPath;
+    this.apiKey = apiKey;
   }
 
   get base() {
@@ -69,16 +72,17 @@ class Server {
   }
 
   async start() {
-    this.proc = spawn(this.bin, [], {
+    this.proc = spawn(this.bin, this.apiKey ? ['-api-key', this.apiKey] : [], {
       cwd: this.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, TODO_ADDR: `127.0.0.1:${this.port}`, TODO_DB: this.dbPath, TODO_DB_DRIVER: 'sqlite' },
     });
     const exited = once(this.proc, 'exit').then(() => {});
     this.exited = exited;
+    const headers = this.apiKey ? { 'X-API-Key': this.apiKey } : {};
     await until(
       async () => {
-        const res = await fetch(`${this.base}/api/boards`).catch(() => null);
+        const res = await fetch(`${this.base}/api/boards`, { headers }).catch(() => null);
         return res && res.ok;
       },
       { what: 'server readiness', timeout: 15000 },
@@ -94,26 +98,30 @@ class Server {
   }
 }
 
-async function apiCreateBoard(base, name) {
+function authHeaders(key) {
+  return key ? { 'X-API-Key': key } : {};
+}
+
+async function apiCreateBoard(base, name, key) {
   const res = await fetch(`${base}/api/boards`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(key) },
     body: JSON.stringify({ name }),
   });
   if (!res.ok) throw new Error(`create board: ${res.status}`);
   return res.json();
 }
 
-async function apiListTodos(base) {
-  const res = await fetch(`${base}/api/todos?filter=`);
+async function apiListTodos(base, key) {
+  const res = await fetch(`${base}/api/todos?filter=`, { headers: authHeaders(key) });
   if (!res.ok) throw new Error(`list todos: ${res.status}`);
   return res.json();
 }
 
-async function apiUpdateTodo(base, id, patch) {
+async function apiUpdateTodo(base, id, patch, key) {
   const res = await fetch(`${base}/api/todos/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(key) },
     body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error(`update todo: ${res.status}`);
@@ -166,6 +174,7 @@ async function main() {
 
   const browser = await chromium.launch();
   let server;
+  let authServer;
   try {
     // ---- shared server/browser session across scenarios ----
     const port = 20000 + Math.floor(Math.random() * 20000);
@@ -360,6 +369,11 @@ async function main() {
       await until(() => row(page, 'Mine edited').isVisible(), { what: 'kept title visible' });
       const after = (await apiListTodos(server.base)).find((t) => t.id === target.id);
       check('keep-mine applies my edit server-side', after?.title === 'Mine edited');
+      // Let the page finish its confirming pull before the server goes
+      // away: the flush consumes the intent as soon as the replay lands,
+      // and stopping mid-pull would serve the service worker's last-good
+      // (pre-merge) cache, flipping the just-kept title back.
+      await until(async () => (await badgeText(page)) === null, { what: 'sync settled after keep-mine' });
 
       // -- keep server version, via Decide later --
       await server.stop();
@@ -470,10 +484,60 @@ async function main() {
       await page2.close();
     }
 
+    // ============ 8. lapsed session: a rejected SSE stream reloads ============
+    {
+      // Rotating the API key invalidates every browser session (the signing
+      // key is derived from it), so restarting with a different one makes
+      // the open page's next event-stream connect fail with a 401 — the
+      // same thing an idle tab sees when its cookie expires, without
+      // waiting out the TTL.
+      const KEY_A = 'e2e-key-a';
+      const KEY_B = 'e2e-key-b';
+      authServer = new Server(bin, root, port + 1, path.join(tmp, 'auth.db'), KEY_A);
+      await authServer.start();
+      await apiCreateBoard(authServer.base, 'Auth board', KEY_A);
+
+      const page3 = await context.newPage();
+      page3.setDefaultTimeout(10000);
+      await page3.goto(authServer.base);
+      await page3.evaluate(() => navigator.serviceWorker.ready);
+      await page3.reload();
+      await addTodo(page3, 'Auth todo');
+      await until(() => row(page3, 'Auth todo').isVisible(), { what: 'auth todo visible' });
+
+      await page3.evaluate(() => {
+        window.__sentinel = true;
+      });
+      await authServer.stop();
+      authServer.apiKey = KEY_B;
+      await authServer.start();
+
+      // EventSource never retries a rejected connect, and the API answers
+      // 401 until the page reloads and serving the document mints a fresh
+      // cookie. The app must do that reload itself (the sentinel property
+      // only disappears when a new document loads).
+      await until(() => page3.evaluate(() => !window.__sentinel), {
+        what: 'page reloaded after the session lapsed',
+        timeout: 20000,
+      });
+      check('rejected event stream reloads the page', true);
+
+      // The reloaded page is fully functional again, live sync included.
+      const target = (await apiListTodos(authServer.base, KEY_B)).find((t) => t.title === 'Auth todo');
+      await apiUpdateTodo(authServer.base, target.id, { title: 'Auth renamed' }, KEY_B);
+      await until(() => row(page3, 'Auth renamed').isVisible(), { what: 'sse live on the fresh session' });
+      check('live sync works after the reload', true);
+
+      await page3.close();
+      await authServer.stop();
+      authServer = null;
+    }
+
     await context.close();
   } finally {
     await browser.close();
     await server?.stop();
+    await authServer?.stop();
     rmSync(tmp, { recursive: true, force: true });
   }
 

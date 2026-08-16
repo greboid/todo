@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -138,6 +139,48 @@ func TestStreamEvents(t *testing.T) {
 		defer h.bus.mu.Unlock()
 		return len(h.bus.subs) == 0
 	})
+}
+
+func TestEventBusClose(t *testing.T) {
+	bus := newEventBus()
+	ch := bus.subscribe()
+	bus.close()
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Fatal("closed bus must close the subscriber channel")
+		}
+	default:
+		t.Fatal("subscriber channel must be closed, not just silent")
+	}
+	// Idempotent, and a broadcast after close must not send on the closed
+	// channel.
+	bus.close()
+	bus.broadcast()
+}
+
+func TestStreamEventsEndsOnBusClose(t *testing.T) {
+	h := New(nil, "")
+	srv := httptest.NewServer(http.HandlerFunc(h.streamEvents))
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	waitFor(t, time.Second, func() bool {
+		h.bus.mu.Lock()
+		defer h.bus.mu.Unlock()
+		return len(h.bus.subs) == 1
+	})
+
+	// Closing the bus ends the stream, so a graceful Shutdown is not held
+	// up: the body must reach a clean EOF instead of hanging.
+	h.Close()
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatalf("stream must end cleanly on bus close: %v", err)
+	}
 }
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {

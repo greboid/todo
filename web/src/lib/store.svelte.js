@@ -656,14 +656,21 @@ function createStore() {
       // CONNECTING: the browser retries by itself (the server advertises a
       // 3s retry); a failing attempt dispatches errors, keeping the stream
       // off the staleness path so the native retry loop is left alone.
-      // CLOSED is fatal — the connect itself was rejected (e.g. a session
-      // cookie that lapsed while idle under an API key) and the browser
-      // will never retry — so tear down and try again shortly.
+      // CLOSED is fatal — the connect itself was rejected (the server
+      // answered with an error status; most often a session cookie that
+      // lapsed while the tab sat idle under an API key) and the browser
+      // will never retry on its own.
       if (es.readyState !== EventSource.CLOSED) {
         live();
         return;
       }
       teardownEvents();
+      // EventSource hides the HTTP status, so confirm the auth suspicion
+      // with a probe through api.js: if the session really lapsed, its 401
+      // handling reloads the page exactly once, and serving the document
+      // mints a fresh cookie — the only real cure. Any other fatal cause
+      // (a 5xx, a bad content type) leaves the plain retry below.
+      api.listBoards().catch(() => {});
       setTimeout(ensureEvents, 15000);
     };
   }

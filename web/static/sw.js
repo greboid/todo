@@ -82,14 +82,17 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(asset(req));
 });
 
-// SPA navigations: fresh document while online (and refresh the cache), the
-// cached shell when offline.
+// SPA navigations: fresh document while online (and refresh the cache when
+// it is a good one, so a transient server error never poisons the offline
+// shell), the cached shell when offline.
 async function navigate(req) {
   try {
     const res = await fetch(req, { cache: 'no-cache' });
     reportNetwork(true);
-    const cache = await caches.open(PRECACHE);
-    await cache.put('/', res.clone());
+    if (res.ok) {
+      const cache = await caches.open(PRECACHE);
+      await cache.put('/', res.clone());
+    }
     return res;
   } catch {
     reportNetwork(false);
