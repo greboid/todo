@@ -5,6 +5,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 // picks it up with no copy step.
 export default defineConfig({
   plugins: [svelte()],
+  publicDir: 'static',
   build: {
     outDir: '../internal/ui/dist',
     emptyOutDir: true,

@@ -1,21 +1,65 @@
 :root {
-  color-scheme: light dark;
-  --bg: light-dark(#f7f7f8, #15151a);
-  --panel: light-dark(#ffffff, #1e1e25);
-  --line: light-dark(#e3e3e8, #31313a);
-  --accent: light-dark(#3b82f6, #4c8dff);
-  --accent-strong: light-dark(#2563eb, #9cc0ff);
-  --text: light-dark(#1f2937, #e6e6eb);
-  --muted: light-dark(#6b7280, #9a9aa6);
-  --danger: light-dark(#ef4444, #f87171);
-  --drop: light-dark(#eef4ff, #1c2740);
-  --accent-tint: light-dark(#cfe0ff, #2a3a5e);
-  --danger-tint: light-dark(#fee2e2, #3e2222);
-  --recur: light-dark(#7c3aed, #c4b5fd);
-  --recur-tint: light-dark(#f3e8ff, #2c2440);
-  --recur-line: light-dark(#ddd6fe, #43325f);
-  --raised: light-dark(#fbfdff, #232330);
-  --shadow: light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.45));
+  color-scheme: light;
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --line: #e3e3e8;
+  --accent: #3b82f6;
+  --accent-strong: #2563eb;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --danger: #ef4444;
+  --drop: #eef4ff;
+  --accent-tint: #cfe0ff;
+  --danger-tint: #fee2e2;
+  --recur: #7c3aed;
+  --recur-tint: #f3e8ff;
+  --recur-line: #ddd6fe;
+  --raised: #fbfdff;
+  --shadow: rgba(0, 0, 0, 0.08);
+}
+
+/* System theme: dark when the OS prefers it, unless the user forced light. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.theme-light) {
+    color-scheme: dark;
+    --bg: #15151a;
+    --panel: #1e1e25;
+    --line: #31313a;
+    --accent: #4c8dff;
+    --accent-strong: #9cc0ff;
+    --text: #e6e6eb;
+    --muted: #9a9aa6;
+    --danger: #f87171;
+    --drop: #1c2740;
+    --accent-tint: #2a3a5e;
+    --danger-tint: #3e2222;
+    --recur: #c4b5fd;
+    --recur-tint: #2c2440;
+    --recur-line: #43325f;
+    --raised: #232330;
+    --shadow: rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* Forced dark theme, regardless of system preference. */
+:root.theme-dark {
+  color-scheme: dark;
+  --bg: #15151a;
+  --panel: #1e1e25;
+  --line: #31313a;
+  --accent: #4c8dff;
+  --accent-strong: #9cc0ff;
+  --text: #e6e6eb;
+  --muted: #9a9aa6;
+  --danger: #f87171;
+  --drop: #1c2740;
+  --accent-tint: #2a3a5e;
+  --danger-tint: #3e2222;
+  --recur: #c4b5fd;
+  --recur-tint: #2c2440;
+  --recur-line: #43325f;
+  --raised: #232330;
+  --shadow: rgba(0, 0, 0, 0.45);
 }
 
 * {

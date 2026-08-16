@@ -10,6 +10,7 @@
   import LabelModal from './lib/LabelModal.svelte';
   import PriorityModal from './lib/PriorityModal.svelte';
   import HelpModal from './lib/HelpModal.svelte';
+  import ThemeToggle from './lib/ThemeToggle.svelte';
 
   const roots = $derived(store.visibleChildrenOf(null));
 
@@ -36,10 +37,12 @@
 
 <header>
   <div class="header-row">
+    <img class="app-icon" src="/icon.svg" alt="" width="24" height="24" />
     <h1>Todo</h1>
     {#if store.loading}<span class="muted">Loading…</span>{/if}
     {#if store.error}<span class="error">{store.error}</span>{/if}
     <div class="toolbar">
+      <ThemeToggle />
       <button class="ghost tool-btn" onclick={() => (boardModalOpen = true)} title="Manage boards">
         <Icon name="board" size={16} /><span class="tool-label">Boards</span>
       </button>
@@ -133,6 +136,10 @@
   h1 {
     font-size: 18px;
     margin: 0;
+  }
+  .app-icon {
+    display: block;
+    border-radius: 6px;
   }
   .muted {
     color: var(--muted);
