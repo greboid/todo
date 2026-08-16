@@ -49,7 +49,11 @@ var swaggerAssets = http.StripPrefix("/api/swagger/", http.FileServerFS(swaggerU
 
 // swaggerPageTpl is the Swagger UI page, rendered so the spec URL is injected
 // and the HTML stays in committed Go source. Only the third-party JS/CSS live
-// in the gitignored swagger-ui build dir.
+// in the gitignored swagger-ui build dir. The inline script mirrors the
+// system colour-scheme preference onto the html.dark-mode class that the dark
+// palette bundled inside swagger-ui.css is keyed to, tracking OS changes live;
+// the small style block covers the canvas and native form controls that the
+// bundled palette leaves out.
 var swaggerPageTpl = template.Must(template.New("swagger").Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -57,6 +61,20 @@ var swaggerPageTpl = template.Must(template.New("swagger").Parse(`<!DOCTYPE html
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Todo API &mdash; Swagger UI</title>
   <link rel="stylesheet" href="swagger-ui.css">
+  <script>
+    (function () {
+      var mq = window.matchMedia("(prefers-color-scheme: dark)");
+      var apply = function () {
+        document.documentElement.classList.toggle("dark-mode", mq.matches);
+      };
+      apply();
+      mq.addEventListener("change", apply);
+    })();
+  </script>
+  <style>
+    html.dark-mode { color-scheme: dark; }
+    html.dark-mode body { background: #1c2022; }
+  </style>
 </head>
 <body>
   <div id="swagger-ui"></div>
