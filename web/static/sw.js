@@ -73,6 +73,9 @@ self.addEventListener('fetch', (event) => {
   const pathname = new URL(req.url).pathname;
   if (pathname.startsWith('/api/')) {
     if (pathname.startsWith('/api/swagger')) return; // API docs: online only
+    // SSE live-sync stream: never intercept — caching a streaming response
+    // makes no sense and EventSource needs the real connection's lifecycle.
+    if (pathname.startsWith('/api/events')) return;
     event.respondWith(apiGet(req));
     return;
   }
@@ -99,7 +102,12 @@ async function apiGet(req) {
   try {
     const res = await fetch(req);
     reportNetwork(true);
-    if (res.ok) {
+    // Never cache event-stream responses: their bodies never end, so the
+    // cache write never settles (and in Firefox wedges the whole cache
+    // storage, taking every other /api read down with it). The fetch handler
+    // bypasses /api/events above; this is the belt-and-braces so a future
+    // routing regression cannot bring the failure mode back.
+    if (res.ok && !(res.headers.get('content-type') || '').includes('text/event-stream')) {
       const cache = await caches.open(DATA);
       await cache.put(req, res.clone());
     }

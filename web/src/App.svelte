@@ -25,6 +25,7 @@
   onMount(() => {
     store.readURL();
     store.load();
+    store.watchEvents();
     const onPop = () => {
       store.readURL();
       store.load();

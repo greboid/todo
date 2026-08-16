@@ -36,6 +36,8 @@ tags:
     description: Named filter queries that can be re-applied from the toolbar.
   - name: Schedule
     description: Free-text due-date/recurrence parsing.
+  - name: Events
+    description: Server-sent events stream for live sync across clients.
 
 security:
   - ApiKeyAuth: []
@@ -539,6 +541,29 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ScheduleExtractResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/events:
+    get:
+      tags: [Events]
+      operationId: streamEvents
+      summary: Server-sent events stream of mutation pokes
+      description: >
+        Opens a `text/event-stream` that emits an `event: sync` message after
+        every successful mutation by any client (todo/board/label/priority/saved-search
+        create, update, delete, move, or complete), plus an `event: ping`
+        heartbeat every ~20s so clients (and proxies) can tell a live
+        connection from a silently-dead one. Events carry no data — the
+        expected client reaction to `sync` is to re-fetch whatever view it is
+        showing (`ping` is liveness only). The schedule parse/extract
+        endpoints never emit events. The stream ends when the client
+        disconnects; browsers should reconnect (the server advertises a
+        3s retry interval).
+      responses:
+        "200":
+          description: SSE stream (`event: sync` pokes; `event: ping` heartbeats).
+          content:
+            text/event-stream:
+              schema: { type: string }
 
 components:
   parameters:

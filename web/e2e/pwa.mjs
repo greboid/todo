@@ -16,6 +16,10 @@
 //   4. merge dialog: clashing server-side edit when back online, both
 //      resolutions, plus the Decide-later deferral path
 //   5. offline deletion of a todo created offline cancels its intents
+//   6. SSE live sync: an idle page picks up a foreign mutation with no
+//      interaction at all, and the stream survives a server restart
+//   7. two tabs share the live sync: both see the same poke, and neither
+//      accumulates aborted event-stream requests
 
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -399,6 +403,71 @@ async function main() {
       await new Promise((r) => setTimeout(r, 1500));
       const list = await apiListTodos(server.base);
       check('cancelled offline create never reaches the server', !list.some((t) => t.title === 'Cancel me'));
+    }
+
+    // ============ 6. SSE: idle poke, and reconnect after a restart ============
+    {
+      const boards = await (await fetch(`${server.base}/api/boards`)).json();
+      const boardId = boards[0].id;
+      const apiAdd = async (title) => {
+        const res = await fetch(`${server.base}/api/todos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, boardId }),
+        });
+        if (!res.ok) throw new Error(`api add "${title}": ${res.status}`);
+      };
+
+      // A foreign mutation through the same server: the open page must
+      // update with no interaction at all (the SSE poke path, distinct
+      // from the queue-flush path exercised above).
+      await apiAdd('Poked todo');
+      await until(() => row(page, 'Poked todo').isVisible(), { what: 'poked todo visible' });
+      check('foreign mutation appears without interaction', true);
+
+      // Restarting the server drops every SSE stream. Afterwards a foreign
+      // mutation must still reach the already-open page: the stream
+      // reconnects (native EventSource retry) and the reconnection itself
+      // re-fetches, covering a poke that raced the reconnect.
+      await server.stop();
+      await server.start();
+      await apiAdd('After restart');
+      await until(() => row(page, 'After restart').isVisible(), {
+        what: 'post-restart mutation visible',
+        timeout: 20000,
+      });
+      check('pokes resume after a server restart without a refresh', true);
+    }
+
+    // ============ 7. two tabs share the SSE stream ============
+    {
+      const page2 = await context.newPage();
+      // Armed after setup: a page reload inherently aborts its in-flight
+      // event stream (browser-cancels it on navigation); only aborts after
+      // the tab is settled count as regressions.
+      let armed = false;
+      let aborted = 0;
+      page2.on('requestfailed', (req) => {
+        if (armed && new URL(req.url()).pathname === '/api/events') aborted++;
+      });
+      await page2.goto(server.base);
+      await page2.evaluate(() => navigator.serviceWorker.ready);
+      await page2.reload();
+      armed = true;
+      await until(() => row(page2, 'After restart').isVisible(), { what: 'second tab renders the board' });
+
+      await fetch(`${server.base}/api/todos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Second tab poke', boardId: 1 }),
+      }).then((r) => {
+        if (!r.ok) throw new Error(`second tab poke add: ${r.status}`);
+      });
+      await until(() => row(page, 'Second tab poke').isVisible(), { what: 'first tab sees poke' });
+      await until(() => row(page2, 'Second tab poke').isVisible(), { what: 'second tab sees poke' });
+      await new Promise((r) => setTimeout(r, 1000));
+      check('both tabs receive the poke with no aborted event streams', aborted === 0);
+      await page2.close();
     }
 
     await context.close();

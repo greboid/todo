@@ -5,6 +5,13 @@ const base = '/api';
 // twice; cleared on the first successful response after the reload.
 const AUTH_RELOAD_KEY = 'todo-auth-reloaded';
 
+// Hard timeout for every request. A wedged transport (a stuck intermediary,
+// a browser that silently dropped the connection) must surface as a network
+// failure — mutations queue for replay, reads show an error — instead of
+// leaving the UI hung on a request that will never answer. 30s is far above
+// any legitimate local response.
+const REQUEST_TIMEOUT_MS = 30000;
+
 function url(path, params) {
   if (!params) return base + path;
   return `${base + path}?${new URLSearchParams(params)}`;
@@ -13,6 +20,7 @@ function url(path, params) {
 async function req(path, { body, method, params } = {}) {
   const res = await fetch(url(path, params), {
     method,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     ...(body !== undefined && {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -33,11 +41,20 @@ async function req(path, { body, method, params } = {}) {
     err.status = res.status;
     throw err;
   }
+  // Marker for the store's SSE echo suppression: a poke arriving right
+  // after this tab's own mutation is its own echo, not someone else's
+  // change. Schedule parse/extract are POSTs but never mutate.
+  if (method && method !== 'GET' && !path.startsWith('/schedule/')) {
+    api.lastMutationAt = Date.now();
+  }
   sessionStorage.removeItem(AUTH_RELOAD_KEY);
   return json;
 }
 
+// Timestamp of this client's last successful mutation, used by the store to
+// skip the SSE echo of its own changes. 0 until the first mutation.
 export const api = {
+  lastMutationAt: 0,
   listTodos: (boardId, filter, today) => {
     const params = {};
     if (boardId) params.boardId = boardId;
