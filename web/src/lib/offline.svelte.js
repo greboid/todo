@@ -143,10 +143,39 @@ function snapshot(todo) {
     labels: [...(todo.labels ?? [])].sort(),
     priority: todo.priority ?? '',
     dueDate: todo.dueDate ?? '',
-    recurrence: todo.recurrence ? JSON.stringify(todo.recurrence) : '',
+    recurrence: todo.recurrence ? canonicalJson(todo.recurrence) : '',
     parentId: todo.parentId ?? null,
     position: todo.position ?? 0,
   };
+}
+
+// JSON.stringify with recursively sorted keys, so two objects describing
+// the same value compare equal regardless of key order.
+function canonicalJson(value) {
+  if (value == null || typeof value !== 'object') return JSON.stringify(value ?? null);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`)
+    .join(',')}}`;
+}
+
+// The value an intent wants a field to end up with, normalised the same way
+// snapshot() normalises server todos, so "what we would write" can be
+// compared against "what the server now has".
+function desiredValue(intent, key) {
+  const src = intent.kind === 'complete' ? { completed: intent.completed } : intent.patch ?? {};
+  const v = src[key];
+  switch (key) {
+    case 'labels':
+      return [...(v ?? [])].sort().join('\u0000');
+    case 'completed':
+      return !!v;
+    case 'recurrence':
+      return v ? canonicalJson(v) : '';
+    default:
+      return v ?? '';
+  }
 }
 
 function fieldChanged(base, server, key) {
@@ -228,12 +257,22 @@ function detectClash(intent, server) {
   let keys = [];
   if (intent.kind === 'update') {
     keys = UPDATE_KEYS.filter((k) => k in (intent.patch ?? {}) && fieldChanged(base, server, k));
+    // A field the server moved to exactly the value this intent would set
+    // (the same edit made from another client) is not a conflict: the
+    // outcome is identical either way. Only fields that would end up
+    // different are worth a dialog.
+    keys = keys.filter((k) => desiredValue(intent, k) !== server[k]);
   } else if (intent.kind === 'complete') {
-    keys = fieldChanged(base, server, 'completed') ? ['completed'] : [];
+    // Same reasoning: another client completing the same todo (or the
+    // server's completion cascade from a parent replayed earlier in this
+    // flush) leaves the server already holding the outcome we want.
+    keys = fieldChanged(base, server, 'completed') && !!intent.completed !== !!server.completed ? ['completed'] : [];
   } else if (intent.kind === 'move') {
     // Position drift from other clients reordering siblings is routine and
-    // the server normalises it; only a different parent is a real clash.
+    // the server normalises it; only a different parent is a real clash —
+    // and not even that when both sides moved it to the same place.
     if ((base.parentId ?? null) === (server.parentId ?? null)) return null;
+    if ((intent.parentId ?? null) === (server.parentId ?? null)) return null;
     return {
       title: base.title,
       summary: 'moving it elsewhere',
@@ -513,17 +552,16 @@ function requireRealId(id) {
 
 // --- flush ---
 
+// Replays the queue. Returns true when it already triggered the confirming
+// reload (anything left the queue — replayed, resolved, or dropped), so the
+// caller knows whether a separate pull is still needed.
 async function flushNow() {
-  if (flushing) return;
-  if (!queued.length) return;
+  if (flushing) return false;
+  if (!queued.length) return false;
   flushing = true;
   syncing = true;
   const notes = [];
-  let progressed = false;
-  // Any conflict resolved (either side) changes what the list should show:
-  // 'theirs' drops a projected change without a replay, so the reload is the
-  // only thing that replaces the optimistic view with the server's.
-  let resolvedAny = false;
+  const startLen = queued.length;
   try {
     while (queued.length) {
       const intent = queued[0];
@@ -568,10 +606,16 @@ async function flushNow() {
             if (!queued.includes(intent)) continue;
             if (choice === 'later') break; // keep queued; badge shows the block
             consume(intent);
-            resolvedAny = true;
             reproject();
             if (choice === 'theirs') continue; // server version wins: drop ours
             // 'mine': fall through and replay on top of the server's version.
+          } else if (intent.kind === 'complete' && server != null && !!server.completed === !!intent.completed) {
+            // The server already holds this outcome (the same completion made
+            // from another client, or the cascade from a parent completed
+            // earlier in this flush): consume instead of replaying, so a
+            // recurring todo can't spawn a second next instance.
+            consume(intent);
+            continue;
           }
         }
       }
@@ -579,7 +623,6 @@ async function flushNow() {
       try {
         await replay(intent);
         consume(intent);
-        progressed = true;
         retryDelay = 2000;
         // A successful replay is proof of connectivity, whatever the flag says.
         online = true;
@@ -599,17 +642,20 @@ async function flushNow() {
     flushing = false;
     syncing = false;
   }
-  if (progressed || resolvedAny) {
+  // Anything leaving the queue (replayed, conflict-resolved, or dropped
+  // after a server rejection) changes what the list should show: re-derive
+  // the projection and reload, so the optimistic view is replaced with the
+  // server's authoritative one as soon as sync lands.
+  const changed = queued.length !== startLen;
+  if (changed) {
     report = null;
     reviewDeferred = false;
     reproject();
-    // Re-sync after any successful replay (not just a full drain): the
-    // reload replaces the optimistic projection with the server's
-    // authoritative view as soon as sync lands.
     await hooks.reload?.();
   }
   if (notes.length) report = notes.join('\n');
   if (queued.length && !reviewDeferred) scheduleRetry();
+  return changed;
 }
 
 // Consume one intent by identity: the flush awaits network calls and merge
@@ -644,11 +690,17 @@ function scheduleRetry() {
   }, retryDelay);
 }
 
-function retryNow() {
+// Full reconnect sync: push the offline queue first, then pull the
+// server's current state. Incoming changes (made from another client while
+// this one was offline, or while the tab sat idle) only reach the UI
+// through load(), so a reconnect re-fetches even when there was nothing to
+// push — otherwise those changes wait for a manual refresh.
+async function resync() {
   clearTimeout(retryTimer);
   retryTimer = null;
   retryDelay = 2000;
-  flushNow();
+  const pushed = await flushNow();
+  if (!pushed) await hooks.reload?.();
 }
 
 function reproject() {
@@ -665,7 +717,7 @@ if (typeof window !== 'undefined') {
   if (typeof navigator !== 'undefined') online = navigator.onLine !== false;
   window.addEventListener('online', () => {
     online = true;
-    retryNow();
+    resync();
   });
   window.addEventListener('offline', () => {
     online = false;
@@ -673,17 +725,23 @@ if (typeof window !== 'undefined') {
   // The service worker reports observed reachability of its network-first
   // fetches; that beats navigator.onLine under throttling and dead routes.
   navigator.serviceWorker?.addEventListener('message', (e) => {
-    if (e.data?.type === 'todo-network') {
-      if (e.data.up && !online) retryNow();
+    if (e.data?.type !== 'todo-network') return;
+    if (e.data.up && !online) {
+      online = true;
+      resync();
+    } else {
       online = e.data.up;
     }
   });
-  // Background tabs throttle timers; re-attempt when the tab comes back.
+  // Background tabs throttle timers, and wake-from-sleep can leave the
+  // online state wedged; re-attempt when the tab comes back. Focus and
+  // visibility also pull fresh server state, so changes made in other
+  // clients while this tab was idle appear without a manual refresh.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && queued.length && !reviewDeferred) retryNow();
+    if (document.visibilityState === 'visible' && !reviewDeferred) resync();
   });
   window.addEventListener('focus', () => {
-    if (queued.length && !reviewDeferred) retryNow();
+    if (!reviewDeferred) resync();
   });
 }
 
