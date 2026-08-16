@@ -27,6 +27,21 @@ type UpdateBoard struct {
 	Position *int    `json:"position,omitempty"`
 }
 
+// SavedSearch is a named filter query the user can re-apply from the toolbar.
+// Searches are global (not board-scoped): applying one filters the active
+// board with the stored query text.
+type SavedSearch struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Query string `json:"query"`
+}
+
+// CreateSavedSearch is the payload for saving a filter query under a name.
+type CreateSavedSearch struct {
+	Name  string `json:"name"`
+	Query string `json:"query"`
+}
+
 // CreateLabel is the payload for adding a label to the predefined set.
 type CreateLabel struct {
 	Name string `json:"name"`

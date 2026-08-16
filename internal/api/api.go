@@ -130,6 +130,9 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/boards/{id}", h.getBoard)
 	mux.HandleFunc("PATCH /api/boards/{id}", h.updateBoard)
 	mux.HandleFunc("DELETE /api/boards/{id}", h.deleteBoard)
+	mux.HandleFunc("GET /api/saved-searches", h.listSavedSearches)
+	mux.HandleFunc("POST /api/saved-searches", h.createSavedSearch)
+	mux.HandleFunc("DELETE /api/saved-searches/{id}", h.deleteSavedSearch)
 	// API docs: embedded OpenAPI spec and a self-hosted Swagger UI.
 	mux.HandleFunc("GET /api/openapi.yaml", h.openapiSpec)
 	mux.HandleFunc("GET /api/swagger/", h.swaggerUI)
@@ -531,6 +534,57 @@ func (h *Handler) deleteBoard(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) listSavedSearches(w http.ResponseWriter, r *http.Request) {
+	searches, err := h.store.ListSavedSearches(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, nonNil(searches))
+}
+
+// createSavedSearch stores a filter query under a name. The query must parse
+// with the filter grammar so a saved search is always appliable later.
+func (h *Handler) createSavedSearch(w http.ResponseWriter, r *http.Request) {
+	var in models.CreateSavedSearch
+	if err := decode(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	in.Query = strings.TrimSpace(in.Query)
+	if in.Query == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("query is required"))
+		return
+	}
+	if _, err := filter.Parse(in.Query); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	s, err := h.store.CreateSavedSearch(r.Context(), in)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, s)
+}
+
+func (h *Handler) deleteSavedSearch(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.store.DeleteSavedSearch(r.Context(), id); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // helpers ----------------------------------------------------------------
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -591,7 +645,8 @@ func writeErr(w http.ResponseWriter, status int, err error) {
 
 func writeStoreErr(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, db.ErrNotFound), errors.Is(err, db.ErrBoardNotFound):
+	case errors.Is(err, db.ErrNotFound), errors.Is(err, db.ErrBoardNotFound),
+		errors.Is(err, db.ErrSavedSearchNotFound):
 		writeErr(w, http.StatusNotFound, err)
 	case errors.Is(err, db.ErrNoBoard),
 		errors.Is(err, db.ErrSelfParent),

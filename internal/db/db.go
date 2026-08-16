@@ -129,6 +129,13 @@ type predefinedPriority struct {
 	Position      int    `bun:"position,notnull,default:0"`
 }
 
+type savedSearch struct {
+	bun.BaseModel `bun:"table:saved_searches"`
+	ID            int64  `bun:"id,pk,autoincrement"`
+	Name          string `bun:"name,notnull"`
+	Query         string `bun:"query,notnull"`
+}
+
 func (b board) toModel() models.Board {
 	return models.Board{ID: b.ID, Name: b.Name, Position: b.Position}
 }
@@ -209,6 +216,11 @@ func (d *DB) migrate(ctx context.Context) error {
 		},
 		func(ctx context.Context) error {
 			_, err := d.db.NewCreateTable().Model((*predefinedPriority)(nil)).IfNotExists().Exec(ctx)
+			return err
+		},
+		// Saved searches: named filter queries re-appliable from the toolbar.
+		func(ctx context.Context) error {
+			_, err := d.db.NewCreateTable().Model((*savedSearch)(nil)).IfNotExists().Exec(ctx)
 			return err
 		},
 		// Add the priority column to pre-existing todos tables. On a fresh DB
@@ -1496,6 +1508,44 @@ func (d *DB) DeleteBoard(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 
+// ListSavedSearches returns every saved search in creation order.
+func (d *DB) ListSavedSearches(ctx context.Context) ([]models.SavedSearch, error) {
+	var ss []savedSearch
+	if err := d.db.NewSelect().Model(&ss).OrderExpr("id").Scan(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]models.SavedSearch, len(ss))
+	for i, s := range ss {
+		out[i] = models.SavedSearch{ID: s.ID, Name: s.Name, Query: s.Query}
+	}
+	return out, nil
+}
+
+// CreateSavedSearch stores a named filter query.
+func (d *DB) CreateSavedSearch(ctx context.Context, in models.CreateSavedSearch) (models.SavedSearch, error) {
+	s := savedSearch{Name: in.Name, Query: in.Query}
+	if err := d.db.NewInsert().Model(&s).Returning("id").Scan(ctx, &s.ID); err != nil {
+		return models.SavedSearch{}, err
+	}
+	return models.SavedSearch{ID: s.ID, Name: s.Name, Query: s.Query}, nil
+}
+
+// DeleteSavedSearch removes a saved search by id.
+func (d *DB) DeleteSavedSearch(ctx context.Context, id int64) error {
+	res, err := d.db.NewDelete().Model((*savedSearch)(nil)).Where("id = ?", id).Exec(ctx)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrSavedSearchNotFound
+	}
+	return nil
+}
+
 func sameParent(a, b *int64) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -1519,4 +1569,6 @@ var (
 	ErrBoardNotFound = errors.New("board not found")
 	ErrLastBoard     = errors.New("cannot delete the last remaining board")
 	ErrInvalidInput  = errors.New("invalid input")
+
+	ErrSavedSearchNotFound = errors.New("saved search not found")
 )

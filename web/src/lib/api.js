@@ -64,4 +64,7 @@ export const api = {
   getBoard: (id) => req(`/boards/${id}`),
   updateBoard: (id, data) => req(`/boards/${id}`, { method: 'PATCH', body: data }),
   deleteBoard: (id) => req(`/boards/${id}`, { method: 'DELETE' }),
+  listSavedSearches: () => req('/saved-searches'),
+  createSavedSearch: (data) => req('/saved-searches', { method: 'POST', body: data }),
+  deleteSavedSearch: (id) => req(`/saved-searches/${id}`, { method: 'DELETE' }),
 };
