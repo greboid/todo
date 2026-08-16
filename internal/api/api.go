@@ -94,18 +94,20 @@ var swaggerPageTpl = template.Must(template.New("swagger").Parse(`<!DOCTYPE html
 </body>
 </html>`))
 
-// Handler wires the todo HTTP routes. It holds no per-request state.
+// Handler wires the todo HTTP routes. It holds no per-request state beyond
+// the event bus shared by SSE clients.
 type Handler struct {
 	store   *db.DB
 	apiKey  string
 	sessKey []byte
+	bus     *eventBus
 }
 
 // New returns a configured Handler. apiKey is optional: when empty the API is
 // open; when set, requests must present the key (header) or a browser
 // session cookie (see session.go).
 func New(store *db.DB, apiKey string) *Handler {
-	h := &Handler{store: store, apiKey: apiKey}
+	h := &Handler{store: store, apiKey: apiKey, bus: newEventBus()}
 	if apiKey != "" {
 		h.sessKey = sessionKey(apiKey)
 	}
@@ -144,13 +146,17 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /api/saved-searches", h.listSavedSearches)
 	mux.HandleFunc("POST /api/saved-searches", h.createSavedSearch)
 	mux.HandleFunc("DELETE /api/saved-searches/{id}", h.deleteSavedSearch)
+	// Live sync: an SSE stream that pokes clients after any mutation.
+	mux.HandleFunc("GET /api/events", h.streamEvents)
 	// API docs: embedded OpenAPI spec and a self-hosted Swagger UI.
 	mux.HandleFunc("GET /api/openapi.yaml", h.openapiSpec)
 	mux.HandleFunc("GET /api/swagger/", h.swaggerUI)
 	mux.HandleFunc("GET /api/swagger", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/swagger/", http.StatusMovedPermanently)
 	})
-	return h.requireAPIKey(mux)
+	// notifyMutations sits inside the key guard so unauthorized mutation
+	// attempts never poke anyone.
+	return h.requireAPIKey(h.notifyMutations(mux))
 }
 
 // requireAPIKey wraps next so that, when a key is configured, requests must

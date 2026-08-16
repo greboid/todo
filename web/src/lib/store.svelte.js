@@ -229,6 +229,12 @@ function createStore() {
   function endEdit() {
     editingId = null;
     editingDirty = false;
+    // A sync deferred while the editor was open lands now (debounced). The
+    // save path re-fetched already, so an extra load is only redundant.
+    if (deferredSync) {
+      deferredSync = false;
+      scheduleSyncLoad();
+    }
   }
 
   function markEditDirty() {
@@ -549,6 +555,138 @@ function createStore() {
     applyFilterText(search.query);
   }
 
+  // --- Live sync (SSE) ---
+  // The server streams pokes (GET /api/events) after every successful
+  // mutation by any client — another tab, a phone, a curl against the API —
+  // so foreign changes appear without a manual refresh. Pokes carry no
+  // data: they just re-run load() (debounced, so bursts coalesce into one
+  // fetch). The echo of this tab's own mutations is skipped (their handlers
+  // already re-fetch), and a poke arriving while a todo is being edited is
+  // deferred until the edit closes so the editor never changes underneath
+  // the user.
+  let eventSource = null;
+  let syncTimer = null;
+  let deferredSync = false;
+
+  // A stream is healthy only while it is OPEN and bytes still arrive: the
+  // server heartbeats every 20s (a named `ping` event), so nothing for
+  // 60s means the connection is dead even though it still looks open
+  // (sleep/wake, a proxy that silently dropped it).
+  const SYNC_STALE_MS = 60000;
+  // A stream that is still CONNECTING gets a grace window before the
+  // watchdog tears it down: tab focus fires ensureEvents during page load,
+  // and closing an in-flight connect is exactly the churn (visible as
+  // NS_BINDING_ABORTED in devtools) this must avoid. A connect genuinely
+  // stuck longer than the grace period (queued behind a dead transport)
+  // still gets force-reconnected — the sweep makes that self-limiting.
+  const CONNECT_GRACE_MS = 45000;
+  let lastEventAt = 0;
+  let connectingSince = 0;
+  let everConnected = false;
+
+  function scheduleSyncLoad() {
+    if (editingId != null) {
+      deferredSync = true;
+      return;
+    }
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      load();
+    }, 300);
+  }
+
+  function onSyncPoke() {
+    if (Date.now() - api.lastMutationAt < 1500) return;
+    scheduleSyncLoad();
+  }
+
+  function teardownEvents() {
+    const es = eventSource;
+    if (!es) return;
+    eventSource = null;
+    es.onerror = null;
+    es.close();
+  }
+
+  // (Re)connect unless a healthy stream is already running: one that is
+  // closed (fatal connect error), silent past the heartbeat window, or
+  // stuck connecting past the grace period is torn down and replaced.
+  function ensureEvents() {
+    if (typeof EventSource === 'undefined') return;
+    if (eventSource) {
+      const state = eventSource.readyState;
+      if (state === EventSource.OPEN) {
+        if (Date.now() - lastEventAt <= SYNC_STALE_MS) return;
+      } else if (state === EventSource.CONNECTING) {
+        if (Date.now() - connectingSince <= CONNECT_GRACE_MS) return;
+      }
+      teardownEvents();
+    }
+    connectEvents();
+  }
+
+  function connectEvents() {
+    const es = new EventSource('/api/events');
+    eventSource = es;
+    lastEventAt = Date.now();
+    connectingSince = Date.now();
+    // Any dispatch (open, sync, ping, even error) proves the socket is
+    // alive; keep it that way for the staleness check above.
+    const live = () => {
+      if (eventSource === es) lastEventAt = Date.now();
+    };
+    es.onopen = () => {
+      if (eventSource !== es) return;
+      live();
+      connectingSince = 0;
+      // Anything can have changed while the stream was down (server
+      // restart, sleep/wake): pokes from that window are gone forever, so
+      // catch up with one load per reconnection.
+      if (everConnected) scheduleSyncLoad();
+      everConnected = true;
+    };
+    es.addEventListener('sync', () => {
+      if (eventSource !== es) return;
+      live();
+      onSyncPoke();
+    });
+    es.addEventListener('ping', live);
+    es.onerror = () => {
+      if (eventSource !== es) return;
+      // CONNECTING: the browser retries by itself (the server advertises a
+      // 3s retry); a failing attempt dispatches errors, keeping the stream
+      // off the staleness path so the native retry loop is left alone.
+      // CLOSED is fatal — the connect itself was rejected (e.g. a session
+      // cookie that lapsed while idle under an API key) and the browser
+      // will never retry — so tear down and try again shortly.
+      if (es.readyState !== EventSource.CLOSED) {
+        live();
+        return;
+      }
+      teardownEvents();
+      setTimeout(ensureEvents, 15000);
+    };
+  }
+
+  // Background tabs throttle timers, so a periodic sweep alone could run
+  // minutes late — it is only the backstop. The moment the tab is visible
+  // again, the window gains focus, or the network returns, the stream is
+  // health-checked and reconnected immediately: none of those events are
+  // throttled, and a frozen tab resumes through these same paths.
+  let healthWired = false;
+  function watchEvents() {
+    if (typeof EventSource === 'undefined') return;
+    ensureEvents();
+    if (healthWired) return;
+    healthWired = true;
+    setInterval(ensureEvents, 30000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') ensureEvents();
+    });
+    window.addEventListener('focus', ensureEvents);
+    window.addEventListener('online', ensureEvents);
+  }
+
   offline.init({
     reload: () => load(),
     reproject,
@@ -618,6 +756,7 @@ function createStore() {
     },
     beginEdit,
     endEdit,
+    watchEvents,
     markEditDirty,
     openContextMenu,
     closeContextMenu,
