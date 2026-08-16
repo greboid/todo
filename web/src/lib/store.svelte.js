@@ -1,6 +1,7 @@
 // Central reactive store. Lives in a .svelte.js module so Svelte 5 runes
 // ($state, $derived) work both here and in components that import it.
 import { api } from './api.js';
+import { offline } from './offline.svelte.js';
 
 // Safe localStorage helpers: access can throw in private mode or sandboxed
 // iframes, so wrap every read/write and degrade to no-op on failure.
@@ -55,9 +56,12 @@ export const store = createStore();
 export { labelColor, LABEL_PALETTE };
 
 function createStore() {
-  // todos holds the server's response for the active board + filter: every
-  // matching todo plus the ancestors that keep the tree connected. The store
-  // does no client-side filtering — the grammar lives in internal/filter.
+  // todos holds the server's response for the active board + filter, with
+  // any queued offline changes projected on top (see offline.svelte.js).
+  // serverTodos keeps the raw response so the projection can be recomputed
+  // after every enqueue. The store does no client-side filtering — the
+  // grammar lives in internal/filter.
+  let serverTodos = $state([]);
   let todos = $state([]);
   let loading = $state(false);
   let error = $state(null);
@@ -239,6 +243,10 @@ function createStore() {
     contextMenu = null;
   }
 
+  function reproject() {
+    todos = offline.project(serverTodos);
+  }
+
   // (Re)fetch boards, the filtered todo list for the active board, and labels.
   // A 400 means the filter is invalid: surface it as filterError and keep the
   // last good list rather than clearing it.
@@ -258,11 +266,12 @@ function createStore() {
         api.listPriorities(),
         api.listSavedSearches(),
       ]);
-      todos = todoList ?? [];
+      serverTodos = todoList ?? [];
       labels = labelList ?? [];
       priorities = priorityList ?? [];
       savedSearches = searchList ?? [];
       filterError = '';
+      reproject();
       syncURL();
     } catch (e) {
       if (e.status === 400) {
@@ -329,20 +338,32 @@ function createStore() {
     }
   }
 
-  async function create({ title, description = '', parentId = null, labels = [], priority = '', dueDate = null, recurrence = null }) {
+  async function create({ title, description = '', parentId = null, labels = [], priority = '', dueDate = null, recurrence = null, rawText = null }) {
     const payload = {
       title,
       description,
-      parentId: parentId ?? undefined,
       labels,
     };
     if (priority) payload.priority = priority;
     if (parentId == null) {
       payload.boardId = activeBoardId ?? undefined;
+    } else {
+      payload.parentId = parentId;
     }
     if (dueDate) payload.dueDate = dueDate;
     if (recurrence) payload.recurrence = recurrence;
-    const created = await api.createTodo(payload);
+    let created;
+    try {
+      created = await api.createTodo(payload);
+    } catch (e) {
+      // Network failure: queue the intent (with the raw quick-add text so the
+      // server re-extracts it at replay) and show it optimistically.
+      if (e.status === undefined) {
+        offline.enqueueCreate({ boardId: activeBoardId, parentId, payload, text: rawText });
+        return null;
+      }
+      throw e;
+    }
     // The new todo may or may not match the active filter; re-fetch to reflect
     // the server's filtered view.
     await load();
@@ -350,7 +371,25 @@ function createStore() {
   }
 
   async function update(id, patch) {
-    const updated = await api.updateTodo(id, patch);
+    const cur = byId(id);
+    if (!cur) return;
+    // Todos that only exist offline (negative temp ids) have no server row
+    // to patch: fold the change into the queued intents instead.
+    if (offline.isTempId(id)) {
+      offline.enqueueUpdate(cur, patch);
+      return;
+    }
+    try {
+      await api.updateTodo(id, patch);
+    } catch (e) {
+      if (e.status === undefined) {
+        offline.enqueueUpdate(cur, patch);
+        return;
+      }
+      error = e.message;
+      await load();
+      return;
+    }
     if (patch.labels) {
       await loadLabels();
     }
@@ -359,7 +398,6 @@ function createStore() {
     }
     // A field change (labels, priority, due date, title) can alter filter membership.
     await load();
-    return updated;
   }
 
   // Toggle completion via the /complete endpoint, then re-fetch the filtered
@@ -368,19 +406,43 @@ function createStore() {
   async function setCompleted(id, completed) {
     const cur = byId(id);
     if (!cur || cur.completed === completed) return;
+    if (offline.isTempId(id)) {
+      offline.enqueueComplete(cur, completed);
+      return;
+    }
     try {
       await api.completeTodo(id, completed);
-      await load();
     } catch (e) {
+      if (e.status === undefined) {
+        offline.enqueueComplete(cur, completed);
+        return;
+      }
       error = e.message;
       await load();
+      return;
     }
+    await load();
   }
 
   async function remove(id) {
     const cur = byId(id);
     if (!cur) return;
-    await api.deleteTodo(id);
+    // Deleting a pending offline create cancels its queued intents rather
+    // than replaying a create+delete pair.
+    if (offline.isTempId(id)) {
+      offline.enqueueDelete(cur);
+      return;
+    }
+    try {
+      await api.deleteTodo(id);
+    } catch (e) {
+      if (e.status === undefined) {
+        offline.enqueueDelete(cur);
+        return;
+      }
+      error = e.message;
+      return;
+    }
     await loadLabels();
     await load();
   }
@@ -389,15 +451,24 @@ function createStore() {
     const cur = byId(id);
     if (!cur) return;
     const targetParent = parentId === undefined ? cur.parentId ?? null : parentId;
+    if (offline.isTempId(id)) {
+      offline.enqueueMove(cur, { parentId: targetParent, position });
+      return;
+    }
     const body = { parentId: targetParent };
     if (position != null) body.position = position;
     try {
       await api.moveTodo(id, body);
-      await load();
     } catch (e) {
+      if (e.status === undefined) {
+        offline.enqueueMove(cur, { parentId: targetParent, position });
+        return;
+      }
       error = e.message;
       await load();
+      return;
     }
+    await load();
   }
 
   async function loadLabels() {
@@ -470,6 +541,11 @@ function createStore() {
     if (!search) return;
     applyFilterText(search.query);
   }
+
+  offline.init({
+    reload: () => load(),
+    reproject,
+  });
 
   return {
     get todos() {

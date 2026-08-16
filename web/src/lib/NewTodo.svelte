@@ -151,21 +151,32 @@
     e.preventDefault();
     const v = text.trim();
     if (!v) return;
+    let res = null;
     try {
-      const res = await api.extractSchedule(v);
-      if (!res || !res.ok || !res.title) return; // no usable title: keep the text
-      const payload = { title: res.title };
-      if (res.labels?.length) payload.labels = res.labels;
-      if (res.priority) payload.priority = res.priority;
-      if (res.dueDate) payload.dueDate = res.dueDate;
-      if (res.recurrence) payload.recurrence = res.recurrence;
-      await onAdd?.(payload);
-      text = '';
-      preview = null;
-      closeDropdown();
-    } catch {
-      /* leave the text so the user can retry */
+      res = await api.extractSchedule(v);
+    } catch (e) {
+      // Offline with text the worker never cached: queue the raw line. The
+      // server re-extracts it at replay time, so the quick-add grammar
+      // still applies (labels, priority, due date) once synced.
+      if (e.status === undefined) {
+        await onAdd?.({ title: v, rawText: v });
+        text = '';
+        preview = null;
+        closeDropdown();
+        return;
+      }
+      return; // server rejected the text (shown via preview): keep it for editing
     }
+    if (!res || !res.ok || !res.title) return; // no usable title: keep the text
+    const payload = { title: res.title, rawText: v };
+    if (res.labels?.length) payload.labels = res.labels;
+    if (res.priority) payload.priority = res.priority;
+    if (res.dueDate) payload.dueDate = res.dueDate;
+    if (res.recurrence) payload.recurrence = res.recurrence;
+    await onAdd?.(payload);
+    text = '';
+    preview = null;
+    closeDropdown();
   }
 
   function onKeydown(e) {
