@@ -167,6 +167,18 @@ func (h *Handler) Close() {
 	h.bus.close()
 }
 
+// isDocsPath reports whether path serves the API documentation: the OpenAPI
+// spec, the Swagger UI page, or its third-party assets. Docs are exempt from
+// the key guard — they expose no data, and unlike the SPA there is no document
+// request ahead of them that could bootstrap a browser session. Loading the
+// docs page itself mints one, so Swagger UI's try-it-out requests pass the
+// guard just like the SPA's do.
+func isDocsPath(path string) bool {
+	return path == "/api/openapi.yaml" ||
+		path == "/api/swagger" ||
+		strings.HasPrefix(path, "/api/swagger/")
+}
+
 // requireAPIKey wraps next so that, when a key is configured, requests must
 // present it — either in an X-API-Key header, as the Bearer token of the
 // Authorization header, or as a valid browser session cookie (minted with
@@ -174,7 +186,7 @@ func (h *Handler) Close() {
 // is a no-op and the API stays open. Key comparison is constant-time.
 func (h *Handler) requireAPIKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.apiKey == "" {
+		if h.apiKey == "" || isDocsPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -673,9 +685,12 @@ func (h *Handler) openapiSpec(w http.ResponseWriter, r *http.Request) {
 }
 
 // swaggerUI renders the Swagger UI page at the directory root and serves the
-// embedded third-party JS/CSS for any sub-path.
+// embedded third-party JS/CSS for any sub-path. Serving the page mints a
+// browser session (when a key is configured) so the docs page, like the SPA
+// document, bootstraps itself: try-it-out requests carry the session cookie.
 func (h *Handler) swaggerUI(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimPrefix(r.URL.Path, "/api/swagger/") == "" {
+		h.MintSession(w, r)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = swaggerPageTpl.Execute(w, struct{ SpecURL string }{SpecURL: "/api/openapi.yaml"})
 		return

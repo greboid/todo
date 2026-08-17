@@ -156,6 +156,54 @@ func TestMintSessionSecure(t *testing.T) {
 	}
 }
 
+func TestDocsBypassAPIKeyAndMintSession(t *testing.T) {
+	h := New(nil, "secret")
+	routes := h.Routes()
+
+	tests := []struct {
+		path       string
+		want       int
+		wantCookie bool
+	}{
+		{"/api/swagger", http.StatusMovedPermanently, false},
+		{"/api/swagger/", http.StatusOK, true},
+		{"/api/swagger/swagger-ui.css", http.StatusOK, false},
+		{"/api/openapi.yaml", http.StatusOK, false},
+		{"/api/todos", http.StatusUnauthorized, false},
+	}
+	var docsCookie string
+	for _, tt := range tests {
+		req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+		req.Header.Set("Cookie", sessionCookieName+"=stale") // must not matter for docs
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, req)
+		if rec.Code != tt.want {
+			t.Errorf("%s: status = %d, want %d", tt.path, rec.Code, tt.want)
+		}
+		if hasCookie := rec.Header().Get("Set-Cookie") != ""; hasCookie != tt.wantCookie {
+			t.Errorf("%s: session cookie minted = %v, want %v", tt.path, hasCookie, tt.wantCookie)
+		}
+		if strings.HasPrefix(rec.Header().Get("Set-Cookie"), sessionCookieName+"=") {
+			docsCookie = rec.Header().Get("Set-Cookie")
+		}
+	}
+
+	// The cookie minted by the docs page authenticates the guarded API, so
+	// Swagger UI's try-it-out requests pass the key guard.
+	if docsCookie == "" {
+		t.Fatal("docs page did not mint a session cookie")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/todos", nil)
+	req.Header.Set("Cookie", strings.Split(docsCookie, ";")[0])
+	rec := httptest.NewRecorder()
+	h.requireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("docs-minted session on guarded path: status = %d, want 200", rec.Code)
+	}
+}
+
 func withHeader(req *http.Request, key, value string) *http.Request {
 	req.Header.Set(key, value)
 	return req
