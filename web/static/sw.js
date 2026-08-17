@@ -101,6 +101,7 @@ async function navigate(req) {
 }
 
 // API reads: network-first, fall back to the last successful response.
+// Todos-list requests are cached under todosCacheKey() — see its comment.
 async function apiGet(req) {
   try {
     const res = await fetch(req);
@@ -112,13 +113,40 @@ async function apiGet(req) {
     // routing regression cannot bring the failure mode back.
     if (res.ok && !(res.headers.get('content-type') || '').includes('text/event-stream')) {
       const cache = await caches.open(DATA);
-      await cache.put(req, res.clone());
+      const key = todosCacheKey(req);
+      if (key === req) {
+        await cache.put(req, res.clone());
+      } else {
+        await cache.put(key, await stampCacheDay(req, res.clone()));
+      }
     }
     return res;
   } catch {
     reportNetwork(false);
-    return (await caches.match(req)) || Response.error();
+    return (await caches.match(todosCacheKey(req))) || Response.error();
   }
+}
+
+// The todos list carries the device's local date (?today=YYYY-MM-DD) so the
+// server resolves date presets from the user's perspective — which changes
+// the URL every midnight and would fork the cache per day. Todos entries are
+// therefore cached under the URL with `today` stripped (boardId/filter stay,
+// so views don't collide) and stamped with the day they were computed for
+// (stampCacheDay), so an offline reopen on a later date still finds the list
+// and the store can recognise it as an older day's view.
+function todosCacheKey(req) {
+  const url = new URL(req.url);
+  if (url.pathname !== '/api/todos' || !url.searchParams.has('today')) return req;
+  url.searchParams.delete('today');
+  return new Request(url);
+}
+
+// Copy of a todos response carrying the `today` it was computed for, so a
+// later cache serve can be flagged as an outdated view.
+async function stampCacheDay(req, res) {
+  const headers = new Headers(res.headers);
+  headers.set('X-Todo-Cache-Day', new URL(req.url).searchParams.get('today') || '');
+  return new Response(await res.text(), { status: res.status, statusText: res.statusText, headers });
 }
 
 function reportNetwork(up) {
