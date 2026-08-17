@@ -824,6 +824,7 @@ components:
         recurrence:
           allOf:
             - $ref: "#/components/schemas/Recurrence"
+          type: object
           nullable: true
           description: Absent = unchanged; null = clear; object = set.
 
@@ -1008,6 +1009,7 @@ components:
         recurrence:
           allOf:
             - $ref: "#/components/schemas/Recurrence"
+          type: object
           nullable: true
           description: Parsed recurrence; null means non-recurring.
         scheduleText:
