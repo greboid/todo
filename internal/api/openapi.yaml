@@ -560,7 +560,7 @@ paths:
         3s retry interval).
       responses:
         "200":
-          description: SSE stream (`event: sync` pokes; `event: ping` heartbeats).
+          description: "SSE stream (`event: sync` pokes; `event: ping` heartbeats)."
           content:
             text/event-stream:
               schema: { type: string }
@@ -689,7 +689,7 @@ components:
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
-        query: { type: string, description: Filter grammar text applied via GET /api/todos?filter=. }
+        query: { type: string, description: "Filter grammar text applied via GET /api/todos?filter=." }
 
     CreateSavedSearch:
       type: object
