@@ -4,3 +4,4 @@ internal/ui/dist
 *.db
 internal/api/swagger-ui
 web/test-results
+.mimosa/

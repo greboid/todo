@@ -8,6 +8,7 @@
   import Self from './TodoItem.svelte';
   import { focus } from './actions.js';
   import { api } from './api.js';
+  import { firstLink, hostLabel } from './links.js';
 
   marked.use({
     gfm: true,
@@ -141,6 +142,10 @@
 
   const children = $derived(store.visibleChildrenOf(todo.id));
 
+  // The link badge targets the first link in the description, so the row
+  // never shows one for a link-free description.
+  const link = $derived(firstLink(todo.description));
+
   // Existing labels that match the current typeahead query and aren't applied.
   const labelSuggestions = $derived(
     store.labels.filter(
@@ -156,6 +161,8 @@
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || e.target.closest('.actions')) return;
     if (e.target.closest('.drag-handle')) return;
+    // The link badge navigates; don't toggle the description too.
+    if (e.target.closest('a')) return;
     // A rapid second click is the start of a double-click — cancel the toggle.
     if (clickTimer) {
       clearTimeout(clickTimer);
@@ -175,6 +182,7 @@
     }
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'BUTTON' || e.target.closest('.actions')) return;
+    if (e.target.closest('a')) return;
     startEdit();
   }
 
@@ -669,6 +677,10 @@
       {#if todo.recurrence}
         <span class="badge recur" title={todo.recurrenceLabel}><Icon name="repeat" size={12} /> {todo.recurrence.fromCompletion ? 'every!' : 'every'} {todo.recurrenceLabel}</span>
       {/if}
+      {#if link}
+        <a class="badge link" href={link} target="_blank" rel="noopener noreferrer" title={link}
+        ><Icon name="external-link" size={12} /> {hostLabel(link)}</a>
+      {/if}
       <span class="actions">
         <button class="ghost" onclick={startEdit} aria-label="Edit"><Icon name="edit" size={16} /></button>
         <button class="ghost" onclick={openLabelPicker} aria-label="Labels"><Icon name="tag" size={16} /></button>
@@ -997,6 +1009,13 @@
     background: var(--recur-tint);
     color: var(--recur);
     border-color: var(--recur-line);
+  }
+  .badge.link {
+    text-decoration: none;
+  }
+  .badge.link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .suggestion .check {
     margin-left: auto;
