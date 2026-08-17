@@ -50,9 +50,20 @@ jobs:
       - name: Go test
         run: go test ./...
 
+  openapi:
+    name: Validate OpenAPI spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Redocly validates the spec structure (bad refs, invalid schemas fail the
+      # build); style warnings stay advisory. Node is preinstalled on the
+      # runner, so npx needs no extra setup.
+      - name: Lint openapi.yaml
+        run: npx --yes @redocly/cli@2 lint internal/api/openapi.yaml
+
   image:
     name: Build and push image
-    needs: test
+    needs: [test, openapi]
     # Only build/push on master and version tags, and only once the test job
     # above has passed (needs + success() gating). Skipped on PRs and other
     # branches.
