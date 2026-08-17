@@ -117,8 +117,8 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      DB_DRIVER: postgres
-      DB: postgres://todo:pick-a-password@db:5432/todo?sslmode=disable
+      TODO_DB_DRIVER: postgres
+      TODO_DB: postgres://todo:pick-a-password@db:5432/todo?sslmode=disable
     depends_on:
       db:
         condition: service_healthy
@@ -147,34 +147,34 @@ volumes:
 
 The app is configured with command-line flags. Each flag can also be set
 through an environment variable of the same name, upper-cased with dashes as
-underscores (`-api-key` → `API_KEY`); a command-line argument wins when both
-are given:
+underscores and prefixed with `TODO_` (`-api-key` → `TODO_API_KEY`); a
+command-line argument wins when both are given:
 
 | Flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
-| `-addr` | `ADDR` | `:8080` | Address the HTTP server listens on |
-| `-db-driver` | `DB_DRIVER` | `sqlite` | Database backend: `sqlite` (also `sqlite3`) or `postgres` (also `pg`/`postgresql`) |
-| `-db` | `DB` | `todo.db` | For SQLite, the database file path; for Postgres, a libpq-style connection string |
-| `-api-key` | `API_KEY` | _(empty)_ | Optional API key guarding `/api`; requests must send it as an `X-API-Key` header or a Bearer token, while browsers get a session cookie instead (empty disables authentication) |
+| `-addr` | `TODO_ADDR` | `:8080` | Address the HTTP server listens on |
+| `-db-driver` | `TODO_DB_DRIVER` | `sqlite` | Database backend: `sqlite` (also `sqlite3`) or `postgres` (also `pg`/`postgresql`) |
+| `-db` | `TODO_DB` | `todo.db` | For SQLite, the database file path; for Postgres, a libpq-style connection string |
+| `-api-key` | `TODO_API_KEY` | _(empty)_ | Optional API key guarding `/api`; requests must send it as an `X-API-Key` header or a Bearer token, while browsers get a session cookie instead (empty disables authentication) |
 
 ### SQLite (default)
 
 No extra configuration is needed — the database is created next to the binary
-in the current working directory. Set `DB` to an absolute path (or run the
+in the current working directory. Set `TODO_DB` to an absolute path (or run the
 container with a mounted `/data`) to control where it lives:
 
 ```sh
-DB=/var/lib/todo/todo.db ./todo
+TODO_DB=/var/lib/todo/todo.db ./todo
 ```
 
 ### Postgres
 
-Point the app at an existing Postgres instance by setting `DB_DRIVER` and
-passing a libpq-style connection string in `DB`:
+Point the app at an existing Postgres instance by setting `TODO_DB_DRIVER` and
+passing a libpq-style connection string in `TODO_DB`:
 
 ```sh
-DB_DRIVER=postgres \
-DB='postgres://user:pass@host:5432/todo?sslmode=disable' \
+TODO_DB_DRIVER=postgres \
+TODO_DB='postgres://user:pass@host:5432/todo?sslmode=disable' \
 ./todo
 ```
 
