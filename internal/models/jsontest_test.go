@@ -89,6 +89,10 @@ func TestMoveTodoUnmarshal(t *testing.T) {
 			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true, ID: ptr(int64(2))}, Position: ptr(0)}},
 		{name: "parent null", raw: `{"parentId":null,"position":1}`,
 			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true}, Position: ptr(1)}},
+		{name: "board move", raw: `{"boardId":7,"parentId":null}`,
+			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true}, BoardID: ptr(int64(7))}},
+		{name: "boardId null leaves board unchanged", raw: `{"boardId":null,"position":2}`,
+			want: models.MoveTodo{Position: ptr(2)}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,6 +108,9 @@ func TestMoveTodoUnmarshal(t *testing.T) {
 			}
 			if !equalPtrs(got.ID, tc.want.ID) {
 				t.Errorf("ID: got %v want %v", got.ID, tc.want.ID)
+			}
+			if !equalPtrs(got.BoardID, tc.want.BoardID) {
+				t.Errorf("BoardID: got %v want %v", got.BoardID, tc.want.BoardID)
 			}
 		})
 	}

@@ -866,10 +866,22 @@ func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Tod
 	}
 
 	var newParent *int64
-	// Target board defaults to the todo's current board. If the todo is being
-	// nested under a parent in another board, the parent's board wins (subtasks
-	// always live on their parent's board).
+	// Target board defaults to the todo's current board. An explicit boardId
+	// moves the todo to that board; nesting under a parent in another board
+	// re-scopes the todo to the parent's board (subtasks always live on their
+	// parent's board, so the parent wins over a supplied boardId).
 	targetBoard := cur.BoardID
+	if in.BoardID != nil && *in.BoardID != cur.BoardID {
+		var count int
+		if err := tx.NewSelect().ColumnExpr("COUNT(*)").TableExpr("boards").
+			Where("id = ?", *in.BoardID).Scan(ctx, &count); err != nil {
+			return models.Todo{}, err
+		}
+		if count == 0 {
+			return models.Todo{}, ErrBoardNotFound
+		}
+		targetBoard = *in.BoardID
+	}
 	if in.Set {
 		// Client explicitly set parentId (either a value or null).
 		newParent = in.ID
@@ -887,7 +899,9 @@ func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Tod
 			}
 		}
 		// newParent == nil here means "move to root"; keep current board.
-	} else if cur.ParentID != nil {
+	} else if cur.ParentID != nil && targetBoard == cur.BoardID {
+		// Keeping the parent is only possible on the same board; a board move
+		// uproots the todo (its parent is on the old board).
 		newParent = cur.ParentID
 	}
 
@@ -896,7 +910,10 @@ func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Tod
 	if in.Position != nil {
 		targetPos = *in.Position
 	}
-	movingToNewParent := in.Set && !sameParent(newParent, cur.ParentID)
+	crossBoard := targetBoard != cur.BoardID
+	// A board change is always a new sibling group, even root-to-root (each
+	// board has its own root ordering).
+	movingToNewParent := !sameParent(newParent, cur.ParentID) || crossBoard
 	// Remove from current ordering (gap-closer). Scope by board so reordering
 	// in one board never perturbs positions in another. IS NOT DISTINCT FROM
 	// is null-safe equality (nil binds NULL, matching root todos) on both engines.
@@ -944,6 +961,20 @@ func (d *DB) Move(ctx context.Context, id int64, in models.MoveTodo) (models.Tod
 		Set("position = ?", targetPos).
 		Where("id = ?", id).Exec(ctx); err != nil {
 		return models.Todo{}, err
+	}
+	if crossBoard {
+		// The subtree follows the moved todo so every descendant stays on its
+		// parent's board. Sibling groups within the subtree are unchanged, so
+		// their positions stay gapless.
+		ids, err := descendantIDs(ctx, tx, id)
+		if err != nil {
+			return models.Todo{}, err
+		}
+		if _, err := tx.NewUpdate().Model((*todo)(nil)).
+			Set("board_id = ?", targetBoard).
+			Where("id IN (?)", bun.In(ids)).Exec(ctx); err != nil {
+			return models.Todo{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return models.Todo{}, err

@@ -138,11 +138,14 @@ paths:
     post:
       tags: [Todos]
       operationId: moveTodo
-      summary: Move a todo (reparent and/or reorder)
+      summary: Move a todo (reparent, reorder, and/or change board)
       description: >
         Reparent and/or reposition a todo within its sibling group. Moving under
         a parent on another board re-scopes the todo to that parent's board.
-        Self-parenting and cycles are rejected (400).
+        An explicit `boardId` moves the todo — with its whole subtree, nesting
+        kept — to that board as a root todo; a `parentId` value takes
+        precedence (the subtask inherits the parent's board). Self-parenting
+        and cycles are rejected (400).
       requestBody:
         required: true
         content:
@@ -833,6 +836,8 @@ components:
       description: >
         Reparent and/or reorder. `parentId` uses the same tri-state as UpdateTodo
         (absent = unchanged, null = root, <number> = nest under parent).
+        A `boardId` other than the todo's current board moves the todo and its
+        whole subtree to that board as a root todo.
       properties:
         parentId:
           type: integer
@@ -843,6 +848,14 @@ components:
           type: integer
           nullable: true
           description: 0-based index within the (new) sibling group; omit to append.
+        boardId:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            Move the todo (with its subtree, nesting kept) to this board as a
+            root todo. Absent or null = stay on the current board. Ignored when
+            a parent is supplied — a subtask inherits the parent's board.
 
     CompleteTodo:
       type: object

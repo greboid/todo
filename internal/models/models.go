@@ -327,16 +327,22 @@ func (u *UpdateTodo) UnmarshalJSON(b []byte) error {
 	return u.OptionalParent.UnmarshalJSON(b)
 }
 
-// MoveTodo moves a todo to a new parent and/or position.
+// MoveTodo moves a todo to a new parent, position, and/or board.
 // If Position is nil, the item is appended to the end of its sibling group.
 // Parent embeds OptionalParent for the absent/null/value tri-state on parentId.
+// BoardID, when set to a board other than the todo's current one, moves the
+// todo (with its whole subtree) to that board as a root todo. A parentId value
+// takes precedence over BoardID — a subtask always inherits its parent's
+// board — so the two are not meant to be combined.
 type MoveTodo struct {
 	OptionalParent
-	Position *int `json:"position,omitempty"`
+	Position *int   `json:"position,omitempty"`
+	BoardID  *int64 `json:"boardId,omitempty"`
 }
 
-// UnmarshalJSON decodes position and routes parentId through OptionalParent.
-// Without this, the promoted UnmarshalJSON would drop the position field.
+// UnmarshalJSON decodes position and boardId and routes parentId through
+// OptionalParent. Without this, the promoted UnmarshalJSON would drop the
+// position field.
 func (m *MoveTodo) UnmarshalJSON(b []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -348,6 +354,13 @@ func (m *MoveTodo) UnmarshalJSON(b []byte) error {
 			return err
 		}
 		m.Position = &p
+	}
+	if v, ok := raw["boardId"]; ok && string(v) != "null" {
+		var bid int64
+		if err := json.Unmarshal(v, &bid); err != nil {
+			return err
+		}
+		m.BoardID = &bid
 	}
 	return m.OptionalParent.UnmarshalJSON(b)
 }
