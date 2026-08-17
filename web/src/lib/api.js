@@ -17,7 +17,7 @@ function url(path, params) {
   return `${base + path}?${new URLSearchParams(params)}`;
 }
 
-async function req(path, { body, method, params } = {}) {
+async function req(path, { body, method, params, meta } = {}) {
   const res = await fetch(url(path, params), {
     method,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -47,6 +47,11 @@ async function req(path, { body, method, params } = {}) {
   if (method && method !== 'GET' && !path.startsWith('/schedule/')) {
     api.lastMutationAt = Date.now();
   }
+  // The service worker serves cached todos lists stamped with the local date
+  // they were computed for (X-Todo-Cache-Day). Callers that need to detect
+  // an outdated offline view pass a `meta` object to receive it (null when
+  // the response is fresh — the header only exists on cache serves).
+  if (meta) meta.cacheDay = res.headers.get('x-todo-cache-day') || null;
   sessionStorage.removeItem(AUTH_RELOAD_KEY);
   return json;
 }
@@ -55,12 +60,12 @@ async function req(path, { body, method, params } = {}) {
 // skip the SSE echo of its own changes. 0 until the first mutation.
 export const api = {
   lastMutationAt: 0,
-  listTodos: (boardId, filter, today) => {
+  listTodos: (boardId, filter, today, meta) => {
     const params = {};
     if (boardId) params.boardId = boardId;
     if (filter) params.filter = filter;
     if (today) params.today = today;
-    return req('/todos', { params: Object.keys(params).length ? params : undefined });
+    return req('/todos', { params: Object.keys(params).length ? params : undefined, meta });
   },
   createTodo: (data) => req('/todos', { method: 'POST', body: data }),
   getTodo: (id) => req(`/todos/${id}`),

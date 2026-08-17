@@ -34,6 +34,15 @@
     if (e.key === 'Escape' && menuOpen) menuOpen = false;
   }
 
+  // "2026-08-16" -> "Aug 16" (with the year when it differs from this one).
+  // Parsed with a time component so the date is read in local time, not UTC.
+  function formatDay(day) {
+    const d = new Date(`${day}T00:00:00`);
+    const opts = { month: 'short', day: 'numeric' };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString(undefined, opts);
+  }
+
   onMount(() => {
     store.readURL();
     store.load();
@@ -60,6 +69,14 @@
     {#if store.loading}<span class="muted">Loading…</span>{/if}
     {#if store.error}<span class="error">{store.error}</span>{/if}
     <div class="header-side">
+      {#if store.staleListDay}
+        <span
+          class="stale-view"
+          title="Offline — showing the list as last synced on {formatDay(store.staleListDay)}. Date filters were evaluated for that day; it refreshes when back online."
+        >
+          Cached view · {formatDay(store.staleListDay)}
+        </span>
+      {/if}
       <SyncStatus />
       <div class="toolbar" id="app-toolbar" class:open={menuOpen}>
         <ThemeToggle />
@@ -219,6 +236,17 @@
     align-items: center;
     gap: 4px;
   }
+  /* Outdated-view notice: the list is served from the worker cache and was
+     computed for a previous local date (see store.staleListDay). */
+  .stale-view {
+    font-size: 12px;
+    color: var(--recur);
+    background: var(--recur-tint);
+    border: 1px solid var(--recur-line);
+    border-radius: 999px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
   .toolbar {
     display: inline-flex;
     gap: 4px;
@@ -295,6 +323,11 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .header-row .stale-view {
+      max-width: 40vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .menu-btn {
       display: inline-flex;

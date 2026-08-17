@@ -65,6 +65,12 @@ function createStore() {
   let todos = $state([]);
   let loading = $state(false);
   let error = $state(null);
+  // Local date (YYYY-MM-DD) the shown list was computed for, set when the
+  // service worker served the todos list from its cache and that day is not
+  // today — the header badges the view as an older day's (date-relative
+  // filters were evaluated against it). Empty on a fresh, authoritative list
+  // or a failed load (which keeps the previously shown data, and its badge).
+  let staleListDay = $state('');
   let labels = $state([]);
   let priorities = $state([]);
   let boards = $state([]);
@@ -271,8 +277,10 @@ function createStore() {
         activeBoardId = boardList[0]?.id ?? null;
         if (activeBoardId) storage.set('todo:activeBoard', String(activeBoardId));
       }
+      const today = todayISO();
+      const listMeta = {};
       const [todoList, labelList, priorityList, searchList] = await Promise.all([
-        api.listTodos(activeBoardId ?? undefined, filterText, todayISO()),
+        api.listTodos(activeBoardId ?? undefined, filterText, today, listMeta),
         api.listLabels(),
         api.listPriorities(),
         api.listSavedSearches(),
@@ -283,6 +291,9 @@ function createStore() {
       priorities = priorityList ?? [];
       savedSearches = searchList ?? [];
       filterError = '';
+      // Cache-served list stamped with a day other than today? The view is
+      // outdated (offline reopen on a later date) — flag it for the header.
+      staleListDay = listMeta.cacheDay && listMeta.cacheDay !== today ? listMeta.cacheDay : '';
       reproject();
       syncURL();
     } catch (e) {
@@ -708,6 +719,9 @@ function createStore() {
     },
     get error() {
       return error;
+    },
+    get staleListDay() {
+      return staleListDay;
     },
     get labels() {
       return labels;
