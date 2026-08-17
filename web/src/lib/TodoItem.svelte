@@ -1206,9 +1206,9 @@
   }
 
   /* Mobile: the head stacks vertically — title row, expanded description,
-     badges, then the action icons right-aligned on their own line so touch
-     targets don't crowd the title. Subtrees indent less so deep nesting
-     keeps some width. */
+     then badges and action icons each on their own right-aligned line so
+     touch targets don't crowd the title. Subtrees indent less so deep
+     nesting keeps some width. */
   @media (max-width: 720px) {
     .item {
       padding: 8px;
@@ -1226,6 +1226,7 @@
     .meta {
       order: 2;
       flex-basis: 100%;
+      justify-content: flex-end;
     }
     .actions {
       order: 3;
