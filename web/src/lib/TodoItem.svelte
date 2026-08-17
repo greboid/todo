@@ -1011,11 +1011,13 @@
     border-color: var(--recur-line);
   }
   .badge.link {
+    background: var(--link-tint);
+    color: var(--link);
+    border-color: var(--link-line);
     text-decoration: none;
   }
   .badge.link:hover {
-    border-color: var(--accent);
-    color: var(--accent);
+    border-color: var(--link);
   }
   .suggestion .check {
     margin-left: auto;

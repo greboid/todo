@@ -14,6 +14,9 @@
   --recur: #7c3aed;
   --recur-tint: #f3e8ff;
   --recur-line: #ddd6fe;
+  --link: #0f766e;
+  --link-tint: #ccfbf1;
+  --link-line: #99f6e4;
   --raised: #fbfdff;
   --shadow: rgba(0, 0, 0, 0.08);
 }
@@ -36,6 +39,9 @@
     --recur: #c4b5fd;
     --recur-tint: #2c2440;
     --recur-line: #43325f;
+    --link: #5eead4;
+    --link-tint: #12302d;
+    --link-line: #2d5a53;
     --raised: #232330;
     --shadow: rgba(0, 0, 0, 0.45);
   }
@@ -58,6 +64,9 @@
   --recur: #c4b5fd;
   --recur-tint: #2c2440;
   --recur-line: #43325f;
+  --link: #5eead4;
+  --link-tint: #12302d;
+  --link-line: #2d5a53;
   --raised: #232330;
   --shadow: rgba(0, 0, 0, 0.45);
 }
