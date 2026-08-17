@@ -60,6 +60,10 @@
   let menuOpen = $derived(store.contextMenu?.todoId === todo.id);
   let menuEl = $state(null);
   let menuPos = $state({ left: 0, top: 0 });
+  // Expandable "Move to board" section within the menu. Reset whenever the
+  // menu opens so a reopen starts collapsed.
+  let boardMenuOpen = $state(false);
+  const otherBoards = $derived(store.boards.filter((b) => b.id !== todo.boardId));
 
   function onContextMenu(e) {
     // The edit form replaces the action row; let the browser serve its menu.
@@ -69,14 +73,17 @@
     e.preventDefault();
     e.stopPropagation();
     menuPos = { left: e.clientX, top: e.clientY };
+    boardMenuOpen = false;
     store.openContextMenu(todo.id, e.clientX, e.clientY);
   }
 
   // Clamp the fixed menu so it never leaves the viewport. Runs after render
   // (menuEl is measurable) but before paint; menuPos was already seeded at
-  // the cursor so nothing is visible in the wrong place meanwhile.
+  // the cursor so nothing is visible in the wrong place meanwhile. Expanding
+  // the board list changes the height, so it re-clamps too.
   $effect(() => {
     if (!menuOpen || !menuEl || !store.contextMenu) return;
+    void boardMenuOpen;
     const rect = menuEl.getBoundingClientRect();
     menuPos = {
       left: Math.max(8, Math.min(store.contextMenu.x, window.innerWidth - rect.width - 8)),
@@ -837,6 +844,29 @@
       <button type="button" role="menuitem" onclick={() => menuAction(() => (addingChild = !addingChild))}>
         <Icon name="plus" size={16} /> Add child
       </button>
+      {#if store.boards.length > 1}
+        <button
+          type="button"
+          role="menuitem"
+          aria-expanded={boardMenuOpen}
+          onclick={() => (boardMenuOpen = !boardMenuOpen)}
+        >
+          <Icon name="board" size={16} /> Move to board
+          <span class="submenu-arrow">{boardMenuOpen ? '▾' : '▸'}</span>
+        </button>
+        {#if boardMenuOpen}
+          {#each otherBoards as board (board.id)}
+            <button
+              type="button"
+              role="menuitem"
+              class="submenu-item"
+              onclick={() => menuAction(() => store.moveToBoard(todo.id, board.id))}
+            >
+              {board.name}
+            </button>
+          {/each}
+        {/if}
+      {/if}
       <button type="button" role="menuitem" class="danger" onclick={() => menuAction(onDelete)}>
         <Icon name="trash" size={16} /> Delete
       </button>
@@ -1200,6 +1230,15 @@
   .context-menu button.danger:hover {
     background: var(--danger-tint);
     color: var(--danger);
+  }
+  .submenu-arrow {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  /* Board entries sit under "Move to board", indented past the icon column. */
+  .context-menu button.submenu-item {
+    padding-left: 34px;
   }
   .defer-picker {
     align-self: flex-start;

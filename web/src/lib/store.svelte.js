@@ -495,6 +495,22 @@ function createStore() {
     await load();
   }
 
+  // Move a todo (with its subtree) to another board as a root todo. Like all
+  // board management this is online-only: a network failure surfaces an error
+  // instead of queueing an intent.
+  async function moveToBoard(id, boardId) {
+    const cur = byId(id);
+    if (!cur || cur.boardId === boardId) return;
+    try {
+      await api.moveTodo(id, { parentId: null, boardId });
+    } catch (e) {
+      error = e.message;
+      if (e.status !== undefined) await load();
+      return;
+    }
+    await load();
+  }
+
   async function loadLabels() {
     labels = (await api.listLabels()) ?? [];
   }
@@ -798,6 +814,7 @@ function createStore() {
     setCompleted,
     remove,
     move,
+    moveToBoard,
     loadLabels,
     addPredefinedLabel,
     deleteLabel,
