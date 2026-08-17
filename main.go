@@ -35,7 +35,7 @@ func run() error {
 	addr := flag.String("addr", ":8080", "address the HTTP server listens on")
 	driver := flag.String("db-driver", "sqlite", "database backend: sqlite (also sqlite3) or postgres (also pg/postgresql)")
 	dsn := flag.String("db", "todo.db", "for SQLite, the database file path; for Postgres, a libpq-style connection string")
-	envflag.Parse()
+	envflag.Parse(envflag.WithPrefix("TODO_"))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
