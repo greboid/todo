@@ -21,6 +21,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Playwright owns e2e/ (its *.spec.js files need a browser and a Go
+    // server, not jsdom); vitest only picks up the colocated unit tests.
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
   },
 });
 

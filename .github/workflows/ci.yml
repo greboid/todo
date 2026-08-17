@@ -52,6 +52,22 @@ jobs:
         run: go build ./...
       - name: Go test
         run: go test ./...
+      # E2E drives the production artifact end-to-end (real Chromium against
+      # the built binary), so it needs the SPA build above, Go, and a browser.
+      - name: Install Chromium for Playwright
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: E2E tests
+        working-directory: web
+        run: pnpm e2e
+      # Traces and page snapshots from any failed e2e test, for debugging.
+      - name: Upload e2e artifacts
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: e2e-traces
+          path: web/test-results/
+          retention-days: 7
 
   openapi:
     name: Validate OpenAPI spec

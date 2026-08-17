@@ -9,9 +9,10 @@
     "copy:swagger": "mkdir -p ../internal/api/swagger-ui && cp node_modules/swagger-ui-dist/swagger-ui-bundle.js node_modules/swagger-ui-dist/swagger-ui.css node_modules/swagger-ui-dist/LICENSE node_modules/swagger-ui-dist/NOTICE ../internal/api/swagger-ui/",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "node e2e/pwa.mjs"
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "jsdom": "^30.0.1",
     "playwright": "^1.62.1",

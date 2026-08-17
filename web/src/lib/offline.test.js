@@ -1,6 +1,9 @@
-// Unit tests for the pure helpers in offline.svelte.js: canonical snapshots,
-// clash detection for the merge dialog, and the optimistic projection.
-// Flush-level behaviour (dialog flows, retries) is covered by web/e2e/pwa.mjs.
+// Unit tests for the offline machinery in offline.svelte.js: canonical
+// snapshots, clash detection, the optimistic projection, and the flush state
+// machine (merge-dialog flows, agreeing completions, wedged-flag replays,
+// cancelled creates, reconnect push-then-pull). Only the pieces that need a
+// real browser and server — service worker, SSE, cookies, the actual DOM —
+// stay in web/e2e/ (Playwright).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Every api method rejects as a network error (no status) by default, so
@@ -452,5 +455,169 @@ describe('flush basics', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(offline.queued).toHaveLength(0);
     expect(apiFns.completeTodo).not.toHaveBeenCalled();
+  });
+});
+
+// --- flush state machine (moved out of the e2e suite, which now covers only
+// what needs a real browser and server) ---
+
+// The async flush awaits mocked api calls and merge-dialog resolutions, so a
+// test settles it by pumping the (fake) microtask queue a few rounds.
+async function settle(rounds = 8) {
+  for (let i = 0; i < rounds; i++) await vi.advanceTimersByTimeAsync(0);
+}
+
+function initHooks() {
+  const hooks = { reload: vi.fn(), reproject: vi.fn() };
+  offline.init(hooks);
+  return hooks;
+}
+
+describe('flush state machine', () => {
+  it('cascade: an agreeing child completion is consumed, not replayed (no merge dialog)', async () => {
+    // Parent and child are both completed offline. At replay time the
+    // parent's completion has already cascaded server-side (see
+    // TestSetCompletedCascade in internal/db), so the server holds the
+    // child's outcome too: the child's own intent must be consumed instead of
+    // replayed — a second complete call could spawn a second next instance of
+    // a recurring todo — and identical values must not raise the dialog.
+    apiFns.getTodo.mockImplementation(async (id) =>
+      id === 8 ? { ...wireTodo(), id: 8, parentId: 7, completed: true } : { ...wireTodo(), completed: false },
+    );
+    apiFns.completeTodo.mockImplementation(async () => ({}));
+    const hooks = initHooks();
+    offline.enqueueComplete(wireTodo(), true);
+    offline.enqueueComplete({ ...wireTodo(), id: 8, parentId: 7 }, true);
+    await settle();
+    expect(apiFns.completeTodo).toHaveBeenCalledTimes(1);
+    expect(apiFns.completeTodo).toHaveBeenCalledWith(7, true);
+    expect(offline.queued).toHaveLength(0);
+    expect(offline.conflict).toBeNull();
+    expect(offline.needsReview).toBe(false);
+    expect(hooks.reload).toHaveBeenCalled();
+  });
+
+  it('flushes despite a wedged-false online flag; a replay heals it', async () => {
+    // Linux can wedge navigator.onLine false forever while reads still work:
+    // flush attempts must never consult the flag, and a successful replay is
+    // proof of connectivity that forces it back true.
+    apiFns.createTodo.mockImplementationOnce(async () => ({ id: 42 }));
+    initHooks();
+    window.dispatchEvent(new Event('offline'));
+    expect(offline.online).toBe(false);
+    offline.enqueueCreate({ boardId: 1, payload: { title: 'Wedged todo' } });
+    await settle();
+    expect(apiFns.createTodo).toHaveBeenCalledTimes(1);
+    expect(offline.queued).toHaveLength(0);
+    expect(offline.online).toBe(true);
+  });
+
+  it('merge dialog: a clashing server edit pauses the flush; keep-mine replays my edit', async () => {
+    apiFns.getTodo.mockImplementation(async () => ({ ...wireTodo(), title: 'Server edited' }));
+    apiFns.updateTodo.mockImplementation(async () => ({}));
+    const hooks = initHooks();
+    offline.enqueueUpdate(wireTodo(), { title: 'Mine edited' });
+    await settle();
+    // The flush is parked on the dialog: both sides shown, review needed,
+    // nothing written yet.
+    expect(offline.conflict).toBeTruthy();
+    expect(offline.conflict.rows).toEqual([
+      expect.objectContaining({ label: 'Title', mine: 'Mine edited', theirs: 'Server edited' }),
+    ]);
+    expect(offline.needsReview).toBe(true);
+    expect(apiFns.updateTodo).not.toHaveBeenCalled();
+    offline.resolveConflict('mine');
+    await settle();
+    expect(apiFns.updateTodo).toHaveBeenCalledWith(7, { title: 'Mine edited' });
+    expect(offline.queued).toHaveLength(0);
+    expect(offline.needsReview).toBe(false);
+    expect(hooks.reload).toHaveBeenCalled();
+  });
+
+  it('merge dialog: decide later defers, focus does not reopen, badge reopen then keep-server drops my edit', async () => {
+    apiFns.getTodo.mockImplementation(async () => ({ ...wireTodo(), title: 'Server again' }));
+    const hooks = initHooks();
+    offline.enqueueUpdate({ ...wireTodo(), title: 'Mine edited' }, { title: 'Second edit' });
+    await settle();
+    expect(offline.conflict).toBeTruthy();
+    offline.deferConflict();
+    await settle();
+    // Deferred: the intent stays queued, no dialog, but review is needed.
+    expect(offline.conflict).toBeNull();
+    expect(offline.queued).toHaveLength(1);
+    expect(offline.needsReview).toBe(true);
+    // Focus/visibility auto-resyncs stay silent while a decision is deferred.
+    const checks = apiFns.getTodo.mock.calls.length;
+    window.dispatchEvent(new Event('focus'));
+    await settle();
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(apiFns.getTodo.mock.calls.length).toBe(checks);
+    // Reopening (the sync badge calls flushNow) re-raises the same clash…
+    const done = offline.flushNow();
+    await settle();
+    expect(offline.conflict).toBeTruthy();
+    expect(offline.conflict.rows[0]).toEqual(
+      expect.objectContaining({ mine: 'Second edit', theirs: 'Server again' }),
+    );
+    // …and keep-server drops my queued edit in favour of the server's.
+    offline.resolveConflict('theirs');
+    await done;
+    await settle();
+    expect(apiFns.updateTodo).not.toHaveBeenCalled();
+    expect(offline.queued).toHaveLength(0);
+    expect(offline.needsReview).toBe(false);
+    expect(hooks.reload).toHaveBeenCalled();
+  });
+
+  it('merge dialog: a server-side deletion raises a discard-only conflict', async () => {
+    apiFns.getTodo.mockImplementation(async () => {
+      throw Object.assign(new Error('not found'), { status: 404 });
+    });
+    const hooks = initHooks();
+    offline.enqueueUpdate(wireTodo(), { title: 'Mine edited' });
+    await settle();
+    expect(offline.conflict?.deletedOnServer).toBe(true);
+    expect(offline.conflict.rows[0].theirs).toBe('(deleted on the server)');
+    offline.resolveConflict('theirs');
+    await settle();
+    expect(offline.queued).toHaveLength(0);
+    expect(hooks.reload).toHaveBeenCalled();
+  });
+
+  it('never replays an offline create that was deleted before reconnect', async () => {
+    const hooks = initHooks();
+    offline.enqueueCreate({ boardId: 1, payload: { title: 'Cancel me' } });
+    await settle(); // network is down: one failed attempt, the create stays queued
+    expect(offline.queued).toHaveLength(1);
+    expect(apiFns.createTodo).toHaveBeenCalledTimes(1);
+    offline.enqueueDelete({ id: offline.queued[0].tempId });
+    expect(offline.queued).toHaveLength(0);
+    expect(offline.project([])).toHaveLength(0);
+    // Reconnect (tab focus): nothing to push, but the confirming pull runs,
+    // and even after the full backoff window the create is never attempted
+    // again — it was cancelled, not replayed.
+    window.dispatchEvent(new Event('focus'));
+    await settle();
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(apiFns.createTodo).toHaveBeenCalledTimes(1);
+    expect(hooks.reload).toHaveBeenCalled();
+  });
+
+  it('reconnect pushes the queue first, then pulls exactly once', async () => {
+    // The online event is a full push-then-pull resync: queued intents replay
+    // and the reload (the pull that makes incoming foreign changes visible)
+    // runs exactly once — from the flush when there was something to push,
+    // from resync itself when the queue was empty.
+    apiFns.createTodo.mockImplementationOnce(async () => ({ id: 42 }));
+    const hooks = initHooks();
+    offline.enqueueCreate({ boardId: 1, payload: { title: 'Pushed' } });
+    await settle();
+    expect(apiFns.createTodo).toHaveBeenCalledTimes(1);
+    expect(hooks.reload).toHaveBeenCalledTimes(1);
+    hooks.reload.mockClear();
+    window.dispatchEvent(new Event('online'));
+    await settle();
+    expect(hooks.reload).toHaveBeenCalledTimes(1);
   });
 });
