@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/csmith/envflag/v2"
+
 	"github.com/greboid/todo/internal/api"
 	"github.com/greboid/todo/internal/db"
 	"github.com/greboid/todo/internal/ui"
@@ -30,16 +32,15 @@ func main() {
 
 func run() error {
 	apiKey := flag.String("api-key", "", "optional API key guarding /api; requests must send it as an X-API-Key header or a Bearer token (empty disables authentication)")
-	flag.Parse()
-
-	addr := envOr("TODO_ADDR", ":8080")
-	driver := envOr("TODO_DB_DRIVER", "sqlite")
-	dsn := envOr("TODO_DB", "todo.db")
+	addr := flag.String("addr", ":8080", "address the HTTP server listens on")
+	driver := flag.String("db-driver", "sqlite", "database backend: sqlite (also sqlite3) or postgres (also pg/postgresql)")
+	dsn := flag.String("db", "todo.db", "for SQLite, the database file path; for Postgres, a libpq-style connection string")
+	envflag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	store, err := db.New(ctx, driver, dsn)
+	store, err := db.New(ctx, *driver, *dsn)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -57,7 +58,7 @@ func run() error {
 	mux.Handle("/", spaHandler(ui.FS(), handler.MintSession))
 
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              *addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -77,18 +78,11 @@ func run() error {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	slog.Info("todo listening", "addr", addr, "driver", driver, "db", dsn, "api-key", *apiKey != "")
+	slog.Info("todo listening", "addr", *addr, "driver", *driver, "db", *dsn, "api-key", *apiKey != "")
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen: %w", err)
 	}
 	return nil
-}
-
-func envOr(key, fallback string) string {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
-		return v
-	}
-	return fallback
 }
 
 // noStore pins Cache-Control: no-store on API responses so the browser never
