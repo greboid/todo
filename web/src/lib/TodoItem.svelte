@@ -303,8 +303,8 @@
   async function toggleCompleted() {
     await store.setCompleted(todo.id, !todo.completed);
   }
-  async function onDelete() {
-    if (!confirm(`Delete "${todo.title}"?`)) return;
+  async function onDelete(e) {
+    if (!e?.shiftKey && !confirm(`Delete "${todo.title}"?`)) return;
     await store.remove(todo.id);
   }
 
@@ -867,7 +867,7 @@
           {/each}
         {/if}
       {/if}
-      <button type="button" role="menuitem" class="danger" onclick={() => menuAction(onDelete)}>
+      <button type="button" role="menuitem" class="danger" onclick={(e) => menuAction(() => onDelete(e))}>
         <Icon name="trash" size={16} /> Delete
       </button>
     </div>
