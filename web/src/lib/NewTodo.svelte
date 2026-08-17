@@ -315,4 +315,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  /* Mobile: the quick-add grammar preview moves to its own line so it can't
+    squeeze the input; side padding matches the tighter mobile gutters. */
+  @media (max-width: 720px) {
+    .row {
+      padding: 12px 12px;
+      flex-wrap: wrap;
+    }
+    .preview {
+      flex-basis: 100%;
+      min-width: 0;
+    }
+  }
 </style>
