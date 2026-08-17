@@ -300,7 +300,11 @@ func ParseDate(raw string, now time.Time) (string, bool) {
 		return iso(addUnits(now, unit, n)), true
 	}
 	if m := rePlusDays.FindStringSubmatch(s); m != nil {
-		n, _ := strconv.Atoi(m[1])
+		digits := m[1]
+		if digits == "" {
+			digits = m[2]
+		}
+		n, _ := strconv.Atoi(digits)
 		return iso(addUnits(now, "day", n)), true
 	}
 
@@ -1161,12 +1165,15 @@ func uniqueSorted(ds []int) []int {
 var (
 	digitsRe = regexp.MustCompile(`^\d+$`)
 
-	reISO        = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})$`)
-	reSlash      = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$`)
-	reEndOf      = regexp.MustCompile(`^(?:end|last day) of (?:the\s+|this\s+)?(\w+)$`)
-	reInN        = regexp.MustCompile(`^in\s+(?:(\d+)|(a|an))\s+(day|days|week|weeks|month|months|year|years|fortnight|fortnights)$`)
-	reAUnitDay   = regexp.MustCompile(`^an?\s+(week|weeks|fortnight|fortnights)\s+(?:on\s+)?(\w+)$`)
-	rePlusDays   = regexp.MustCompile(`^\+?(\d+)\s*(?:days?)?$`)
+	reISO      = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})$`)
+	reSlash    = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$`)
+	reEndOf    = regexp.MustCompile(`^(?:end|last day) of (?:the\s+|this\s+)?(\w+)$`)
+	reInN      = regexp.MustCompile(`^in\s+(?:(\d+)|(a|an))\s+(day|days|week|weeks|month|months|year|years|fortnight|fortnights)$`)
+	reAUnitDay = regexp.MustCompile(`^an?\s+(week|weeks|fortnight|fortnights)\s+(?:on\s+)?(\w+)$`)
+	// Relative day offsets need an explicit sign or unit ("+3", "+3 days",
+	// "3 days"): a bare number is just a title word, so "invoice 2024" does
+	// not become a date 2024 days out.
+	rePlusDays   = regexp.MustCompile(`^(?:\+(\d+)(?:\s*days?)?|(\d+)\s*days?)$`)
 	reNextWord   = regexp.MustCompile(`^next\s+(\w+)$`)
 	reThisWord   = regexp.MustCompile(`^this\s+(\w+)$`)
 	reSingleWord = regexp.MustCompile(`^(\w+)$`)
