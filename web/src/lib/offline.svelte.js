@@ -113,7 +113,7 @@ restore();
 
 // --- helpers ---
 
-function isTempId(id) {
+export function isTempId(id) {
   return id != null && id < 0;
 }
 
@@ -135,7 +135,7 @@ function resolveParent(parentId) {
 
 // Canonical comparable snapshot of a todo (works for wire todos and for the
 // store's optimistically projected ones alike).
-function snapshot(todo) {
+export function snapshot(todo) {
   return {
     title: todo.title ?? '',
     description: todo.description ?? '',
@@ -151,7 +151,7 @@ function snapshot(todo) {
 
 // JSON.stringify with recursively sorted keys, so two objects describing
 // the same value compare equal regardless of key order.
-function canonicalJson(value) {
+export function canonicalJson(value) {
   if (value == null || typeof value !== 'object') return JSON.stringify(value ?? null);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   return `{${Object.keys(value)
@@ -163,7 +163,7 @@ function canonicalJson(value) {
 // The value an intent wants a field to end up with, normalised the same way
 // snapshot() normalises server todos, so "what we would write" can be
 // compared against "what the server now has".
-function desiredValue(intent, key) {
+export function desiredValue(intent, key) {
   const src = intent.kind === 'complete' ? { completed: intent.completed } : intent.patch ?? {};
   const v = src[key];
   switch (key) {
@@ -183,12 +183,12 @@ function desiredValue(intent, key) {
 // string in desiredValue, so comparing them directly would always look
 // different and flag a conflict even when the server already holds the
 // outcome this intent would write.
-function serverValue(server, key) {
+export function serverValue(server, key) {
   if (key === 'labels') return [...(server[key] ?? [])].sort().join('\u0000');
   return server[key];
 }
 
-function fieldChanged(base, server, key) {
+export function fieldChanged(base, server, key) {
   const a = base[key];
   const b = server[key];
   if (Array.isArray(a) || Array.isArray(b)) {
@@ -197,7 +197,7 @@ function fieldChanged(base, server, key) {
   return a !== b;
 }
 
-function fmtValue(key, value) {
+export function fmtValue(key, value) {
   switch (key) {
     case 'labels':
       return Array.isArray(value) && value.length ? value.join(', ') : 'none';
@@ -214,14 +214,14 @@ function fmtValue(key, value) {
 
 // Minimal recurrence rendering for the merge dialog; the authoritative
 // formatter lives server-side, this only needs to be recognisable.
-function formatRecurrence(value) {
+export function formatRecurrence(value) {
   if (!value) return 'none';
   const rule = typeof value === 'string' ? safeJson(value) : value;
   if (!rule || !rule.frequency) return 'none';
   return `every ${rule.interval || 1} ${rule.frequency}${rule.fromCompletion ? ' (from completion)' : ''}`;
 }
 
-function safeJson(text) {
+export function safeJson(text) {
   try {
     return JSON.parse(text);
   } catch {
@@ -229,7 +229,7 @@ function safeJson(text) {
   }
 }
 
-function describeTarget(intent) {
+export function describeTarget(intent) {
   const title = intent.base?.title ?? 'a todo';
   switch (intent.kind) {
     case 'create':
@@ -250,7 +250,7 @@ function describeTarget(intent) {
 // Returns a conflict model for the merge dialog, or null when the intent can
 // be replayed as-is. `server` is the server's current todo (already
 // snapshotted) or null when it was deleted server-side.
-function detectClash(intent, server) {
+export function detectClash(intent, server) {
   const base = intent.base;
   if (!base) return null;
 
@@ -316,7 +316,7 @@ function detectClash(intent, server) {
   };
 }
 
-function mineSummary(intent) {
+export function mineSummary(intent) {
   switch (intent.kind) {
     case 'complete':
       return intent.completed ? 'mark it done' : 'mark it not done';
@@ -738,6 +738,22 @@ function reproject() {
 
 function init({ reload, reproject }) {
   hooks = { reload, reproject };
+}
+
+// Test-only: wipe module state between unit tests. Never call from app code.
+export function _resetForTests() {
+  queued = [];
+  idMap = {};
+  nextTempId = -1;
+  online = true;
+  report = null;
+  conflict = null;
+  reviewDeferred = false;
+  flushing = false;
+  clearTimeout(retryTimer);
+  retryTimer = null;
+  retryDelay = 2000;
+  conflictWaiter = null;
 }
 
 if (typeof window !== 'undefined') {

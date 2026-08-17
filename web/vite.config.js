@@ -19,6 +19,9 @@ export default defineConfig({
       '/api': 'http://localhost:8080',
     },
   },
+  test: {
+    environment: 'jsdom',
+  },
 });
 
 // Rewrites the service worker (copied from web/static into the output) with
