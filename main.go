@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/csmith/envflag/v2"
+	"github.com/csmith/slogflags"
 
 	"github.com/greboid/todo/internal/api"
 	"github.com/greboid/todo/internal/db"
@@ -36,6 +37,7 @@ func run() error {
 	driver := flag.String("db-driver", "sqlite", "database backend: sqlite (also sqlite3) or postgres (also pg/postgresql)")
 	dsn := flag.String("db", "todo.db", "for SQLite, the database file path; for Postgres, a libpq-style connection string")
 	envflag.Parse(envflag.WithPrefix("TODO_"))
+	_ = slogflags.Logger(slogflags.WithSetDefault(true))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

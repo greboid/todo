@@ -11,7 +11,10 @@ require (
 	modernc.org/sqlite v1.56.0 // indirect
 )
 
-require github.com/csmith/envflag/v2 v2.0.0
+require (
+	github.com/csmith/envflag/v2 v2.0.0
+	github.com/csmith/slogflags v1.2.0
+)
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
