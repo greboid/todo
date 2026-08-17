@@ -31,34 +31,56 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      # Build the SPA into internal/ui/dist first so the go:embed in the Go
-      # steps below has its input.
-      - name: Build SPA
+      - name: Install dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      # The SPA build produces the go:embed inputs (internal/ui/dist and the
+      # gitignored internal/api/swagger-ui) that every Go step below needs;
+      # vitest needs only node_modules, so the two run concurrently.
+      - name: SPA build and unit tests
         working-directory: web
         run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-      - name: Unit tests (SPA)
-        working-directory: web
-        run: pnpm test
+          pnpm build & build=$!
+          pnpm test & unit=$!
+          status=0
+          wait "$build" || status=1
+          wait "$unit" || status=1
+          exit "$status"
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
           go-version: '1.26'
           cache: true
-      - name: Go vet
-        run: go vet ./...
-      - name: Go build
-        run: go build ./...
-      - name: Go test
-        run: go test ./...
+      # The one real build of the artifact e2e drives; the vet/test step
+      # below reuses its build-cache entries instead of recompiling.
+      - name: Build server binary
+        run: go build -o todo-e2e .
+      # The browser download (~170MB) is tied to the playwright version pinned
+      # in the lockfile; caching it leaves only the apt deps to install.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      # vet/test are CPU-bound while the Chromium install is network-bound, so
+      # all three run concurrently; a failure in any branch fails the step.
+      - name: Go vet, Go test, and Chromium install
+        run: |
+          go vet ./... & vet=$!
+          go test ./... & gotest=$!
+          (cd web && pnpm exec playwright install --with-deps chromium) & chromium=$!
+          status=0
+          wait "$vet" || status=1
+          wait "$gotest" || status=1
+          wait "$chromium" || status=1
+          exit "$status"
       # E2E drives the production artifact end-to-end (real Chromium against
-      # the built binary), so it needs the SPA build above, Go, and a browser.
-      - name: Install Chromium for Playwright
-        working-directory: web
-        run: pnpm exec playwright install --with-deps chromium
+      # the binary built above); E2E_BIN makes playwright's globalSetup skip
+      # its own go build.
       - name: E2E tests
         working-directory: web
+        env:
+          E2E_BIN: ${{ github.workspace }}/todo-e2e
         run: pnpm e2e
       # Traces and page snapshots from any failed e2e test, for debugging.
       - name: Upload e2e artifacts

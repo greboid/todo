@@ -11,6 +11,9 @@ const run = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '../..');
 
 export default async function globalSetup() {
+  // A caller that already built the binary (CI builds it once in the workflow
+  // and hands it over) owns the file and its cleanup — nothing to do here.
+  if (process.env.E2E_BIN) return () => {};
   const tmp = mkdtempSync(path.join(tmpdir(), 'todo-e2e-bin-'));
   const bin = path.join(tmp, 'todo');
   await run('go', ['build', '-o', bin, '.'], { cwd: root });
