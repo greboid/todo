@@ -650,36 +650,40 @@
         onclick={onHeadClick}
         onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); startEdit(); } }}
       >{todo.title}</span>
-      {#if todo.labels?.length}
-        <span class="labels">
-          {#each todo.labels as label (label)}
+      {#if todo.labels?.length || todo.priority || todo.dueDate || todo.recurrence || link}
+        <span class="meta">
+          {#if todo.labels?.length}
+            <span class="labels">
+              {#each todo.labels as label (label)}
+                <span
+                  class="label"
+                  style:background={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '') + '22'}
+                  style:border-color={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '')}
+                  style:color={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '')}
+                >{label}</span>
+              {/each}
+            </span>
+          {/if}
+          {#if todo.priority}
             <span
-              class="label"
-              style:background={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '') + '22'}
-              style:border-color={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '')}
-              style:color={labelColor(label, todo.labelColors?.find((lc) => lc.name === label)?.color || '')}
-            >{label}</span>
-          {/each}
+              class="badge priority"
+              style:background={labelColor(todo.priority, todo.priorityColor || '') + '22'}
+              style:border-color={labelColor(todo.priority, todo.priorityColor || '')}
+              style:color={labelColor(todo.priority, todo.priorityColor || '')}
+            ><Icon name="flag" size={12} /> {todo.priority}</span>
+          {/if}
+          {#if todo.dueDate}
+            {@const overdue = !todo.completed && todo.dueDate < todayISO()}
+            <span class="badge due {overdue ? 'overdue' : ''}"><Icon name="calendar" size={12} /> {todo.dueDate}</span>
+          {/if}
+          {#if todo.recurrence}
+            <span class="badge recur" title={todo.recurrenceLabel}><Icon name="repeat" size={12} /> {todo.recurrence.fromCompletion ? 'every!' : 'every'} {todo.recurrenceLabel}</span>
+          {/if}
+          {#if link}
+            <a class="badge link" href={link} target="_blank" rel="noopener noreferrer" title={link}
+            ><Icon name="external-link" size={12} /> {hostLabel(link)}</a>
+          {/if}
         </span>
-      {/if}
-      {#if todo.priority}
-        <span
-          class="badge priority"
-          style:background={labelColor(todo.priority, todo.priorityColor || '') + '22'}
-          style:border-color={labelColor(todo.priority, todo.priorityColor || '')}
-          style:color={labelColor(todo.priority, todo.priorityColor || '')}
-        ><Icon name="flag" size={12} /> {todo.priority}</span>
-      {/if}
-      {#if todo.dueDate}
-        {@const overdue = !todo.completed && todo.dueDate < todayISO()}
-        <span class="badge due {overdue ? 'overdue' : ''}"><Icon name="calendar" size={12} /> {todo.dueDate}</span>
-      {/if}
-      {#if todo.recurrence}
-        <span class="badge recur" title={todo.recurrenceLabel}><Icon name="repeat" size={12} /> {todo.recurrence.fromCompletion ? 'every!' : 'every'} {todo.recurrenceLabel}</span>
-      {/if}
-      {#if link}
-        <a class="badge link" href={link} target="_blank" rel="noopener noreferrer" title={link}
-        ><Icon name="external-link" size={12} /> {hostLabel(link)}</a>
       {/if}
       <span class="actions">
         <button class="ghost" onclick={startEdit} aria-label="Edit"><Icon name="edit" size={16} /></button>
@@ -689,10 +693,14 @@
         <button class="ghost" onclick={() => (addingChild = !addingChild)} aria-label="Add child"><Icon name="plus" size={16} /></button>
         <button class="ghost danger" onclick={onDelete} aria-label="Delete"><Icon name="trash" size={16} /></button>
       </span>
+      <!-- Inside .head so the mobile layout can slot the description between
+           the title and the badges with flex order; flex-basis keeps it on
+           its own line below the whole row on desktop, exactly where a
+           sibling below .head used to render. -->
+      {#if expanded && todo.description}
+        <div class="detail" use:dblclickAction>{@html renderDescription(todo.description)}</div>
+      {/if}
     </div>
-    {#if expanded && todo.description}
-      <div class="detail" use:dblclickAction>{@html renderDescription(todo.description)}</div>
-    {/if}
   {/if}
 
   {#if labelPickerOpen}
@@ -894,6 +902,10 @@
     color: var(--muted);
     margin: 6px 0 2px;
     word-break: break-word;
+    /* A flex child of .head: always claims its own line, after the row's
+       other lines (browsers keep it last on desktop via DOM order). */
+    flex-basis: 100%;
+    cursor: default;
   }
   .detail :global(a) {
     color: inherit;
@@ -979,6 +991,14 @@
   .labels {
     display: inline-flex;
     gap: 4px;
+  }
+  /* Labels and badges group together so the mobile layout can drop them
+     onto their own line below the title. */
+  .meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
   }
   .label {
     background: var(--drop);
@@ -1183,5 +1203,41 @@
   }
   .defer-picker {
     align-self: flex-start;
+  }
+
+  /* Mobile: the head stacks vertically — title row, expanded description,
+     badges, then the action icons right-aligned on their own line so touch
+     targets don't crowd the title. Subtrees indent less so deep nesting
+     keeps some width. */
+  @media (max-width: 720px) {
+    .item {
+      padding: 8px;
+    }
+    .head {
+      gap: 6px;
+    }
+    .title {
+      flex: 1;
+      min-width: 0;
+    }
+    .detail {
+      order: 1;
+    }
+    .meta {
+      order: 2;
+      flex-basis: 100%;
+    }
+    .actions {
+      order: 3;
+      flex-basis: 100%;
+      justify-content: flex-end;
+    }
+    .actions button {
+      padding: 4px 10px;
+    }
+    .children {
+      margin-left: 8px;
+      padding-left: 8px;
+    }
   }
 </style>

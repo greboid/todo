@@ -98,4 +98,16 @@
     line-height: 1.4;
     z-index: 20;
   }
+
+  /* Mobile: the search input keeps its clear button beside it; the sort
+     chips drop to their own line below instead of squeezing the input. */
+  @media (max-width: 720px) {
+    .filter {
+      flex-wrap: wrap;
+    }
+    .sort-chips {
+      order: 3;
+      flex-basis: 100%;
+    }
+  }
 </style>
