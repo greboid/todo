@@ -180,11 +180,14 @@ type Todo struct {
 	PriorityColor   string       `json:"priorityColor,omitempty"`   // hex colour for the priority, "" = auto
 	DueDate         string       `json:"dueDate,omitempty"`         // "YYYY-MM-DD", "" = none
 	Recurrence      *Recurrence  `json:"recurrence,omitempty"`      // nil = non-recurring
+	CreatedAt       string       `json:"createdAt,omitempty"`       // RFC3339 UTC, stamped at creation
+	CompletedAt     string       `json:"completedAt,omitempty"`     // RFC3339 UTC, stamped on completion, "" = not completed
 	ScheduleText    string       `json:"scheduleText,omitempty"`    // canonical free-text seed for the edit field (computed, not stored)
 	RecurrenceLabel string       `json:"recurrenceLabel,omitempty"` // short badge label, e.g. "2 weeks on Mon, Wed" (computed, not stored)
 }
 
-// CreateTodo is the payload for creating a new todo.
+// CreateTodo is the payload for creating a new todo. CreatedAt is optional:
+// absent/empty defaults the new todo's creation time to now.
 type CreateTodo struct {
 	BoardID     *int64      `json:"boardId,omitempty"`
 	Title       string      `json:"title"`
@@ -195,6 +198,7 @@ type CreateTodo struct {
 	Priority    string      `json:"priority,omitempty"`
 	DueDate     *string     `json:"dueDate,omitempty"`
 	Recurrence  *Recurrence `json:"recurrence,omitempty"`
+	CreatedAt   *string     `json:"createdAt,omitempty"`
 }
 
 // OptionalParent captures the three-way distinction encoding/json cannot
