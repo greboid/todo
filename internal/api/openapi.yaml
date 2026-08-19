@@ -743,6 +743,19 @@ components:
           allOf:
             - $ref: "#/components/schemas/Recurrence"
           description: Recurrence rule; absent means non-recurring.
+        createdAt:
+          type: string
+          format: date-time
+          description: >
+            Creation time, RFC3339 UTC. Todos created before this field existed
+            are backfilled with the migration time.
+        completedAt:
+          type: string
+          format: date-time
+          description: >
+            Completion time, RFC3339 UTC; absent while the todo is incomplete.
+            Stamped on the first completion (re-completion keeps it) and cleared
+            on un-completion.
         scheduleText:
           type: string
           description: Canonical free-text seed for the edit field (computed, not stored).
@@ -784,6 +797,12 @@ components:
           description: "YYYY-MM-DD."
         recurrence:
           $ref: "#/components/schemas/Recurrence"
+        createdAt:
+          type: string
+          format: date-time
+          description: >
+            Optional creation time (RFC3339), e.g. for imports; absent/empty
+            defaults to now. Canonicalised to UTC.
 
     UpdateTodo:
       type: object

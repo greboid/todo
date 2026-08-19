@@ -93,7 +93,9 @@ type todo struct {
 	Position      int     `bun:"position,notnull"`
 	Priority      string  `bun:"priority,notnull,default:''"`
 	DueDate       *string `bun:"due_date,nullzero"`
-	Recurrence    *string `bun:"recurrence,nullzero"` // raw JSON text, as today
+	Recurrence    *string `bun:"recurrence,nullzero"`   // raw JSON text, as today
+	CreatedAt     *string `bun:"created_at,nullzero"`   // RFC3339 UTC text
+	CompletedAt   *string `bun:"completed_at,nullzero"` // RFC3339 UTC text, NULL = not completed
 }
 
 type label struct {
@@ -154,6 +156,12 @@ func (t todo) toModel(labels []string) models.Todo {
 	}
 	if t.DueDate != nil {
 		m.DueDate = *t.DueDate
+	}
+	if t.CreatedAt != nil {
+		m.CreatedAt = *t.CreatedAt
+	}
+	if t.CompletedAt != nil {
+		m.CompletedAt = *t.CompletedAt
 	}
 	if t.Recurrence != nil && *t.Recurrence != "" {
 		var rc models.Recurrence
@@ -227,6 +235,32 @@ func (d *DB) migrate(ctx context.Context) error {
 		// the CREATE TABLE above already includes it; this handles upgrades.
 		func(ctx context.Context) error {
 			return addColumnIfMissing(ctx, d.db, "todos", "priority", "TEXT NOT NULL DEFAULT ''")
+		},
+		// Add the timestamp columns to pre-existing todos tables (same pattern
+		// as priority above). Nullable TEXT holding RFC3339 UTC strings.
+		func(ctx context.Context) error {
+			return addColumnIfMissing(ctx, d.db, "todos", "created_at", "TEXT")
+		},
+		func(ctx context.Context) error {
+			return addColumnIfMissing(ctx, d.db, "todos", "completed_at", "TEXT")
+		},
+		// Backfill timestamps on rows predating the columns: createdAt for
+		// every row, completedAt for rows already completed. The migration-run
+		// time is the best available estimate for historical rows; new writes
+		// always carry real timestamps. Idempotent: only NULL rows are
+		// touched, so this is a no-op on fresh databases.
+		func(ctx context.Context) error {
+			now := nowRFC3339()
+			if _, err := d.db.NewUpdate().TableExpr("todos").
+				Set("created_at = ?", now).
+				Where("created_at IS NULL").Exec(ctx); err != nil {
+				return err
+			}
+			_, err := d.db.NewUpdate().TableExpr("todos").
+				Set("completed_at = ?", now).
+				Where("completed_at IS NULL").
+				Where("completed = 1").Exec(ctx)
+			return err
 		},
 		// Add the position column to pre-existing predefined_priorities tables
 		// so priorities carry an explicit user-defined order.
@@ -519,6 +553,10 @@ func (d *DB) Create(ctx context.Context, in models.CreateTodo) (models.Todo, err
 	if err != nil {
 		return models.Todo{}, err
 	}
+	createdAt := nowRFC3339()
+	if in.CreatedAt != nil && *in.CreatedAt != "" {
+		createdAt = *in.CreatedAt // validated and canonicalised by the API layer
+	}
 	t := todo{
 		BoardID:     boardID,
 		Title:       in.Title,
@@ -528,6 +566,7 @@ func (d *DB) Create(ctx context.Context, in models.CreateTodo) (models.Todo, err
 		Priority:    in.Priority,
 		DueDate:     in.DueDate,
 		Recurrence:  recurrenceString(in.Recurrence),
+		CreatedAt:   &createdAt,
 	}
 	if err := tx.NewInsert().Model(&t).Returning("id").Scan(ctx, &t.ID); err != nil {
 		return models.Todo{}, fmt.Errorf("insert todo: %w", err)
@@ -594,9 +633,10 @@ func (d *DB) Get(ctx context.Context, id int64) (models.Todo, error) {
 }
 
 // SetCompleted sets the completed flag on a todo and, recursively, all of its
-// descendants. Descendants are walked in Go (parent_id by parent_id) and the
-// whole subtree is updated in one statement, so the cascade is as atomic as a
-// single UPDATE. Returns the updated root todo.
+// descendants, stamping completed_at as it goes (kept on the first completion,
+// cleared on un-completion). Descendants are walked in Go (parent_id by
+// parent_id) and the whole subtree is updated in one statement, so the cascade
+// is as atomic as a single UPDATE. Returns the updated root todo.
 func (d *DB) SetCompleted(ctx context.Context, id int64, completed bool) (models.Todo, error) {
 	// Completing a recurring todo spawns a fresh incomplete instance (clone-next)
 	// before the completion cascade runs. Un-completing does not spawn.
@@ -609,9 +649,9 @@ func (d *DB) SetCompleted(ctx context.Context, id int64, completed bool) (models
 	if err != nil {
 		return models.Todo{}, err
 	}
-	res, err := d.db.NewUpdate().Model((*todo)(nil)).
-		Set("completed = ?", boolToInt(completed)).
-		Where("id IN (?)", bun.In(ids)).Exec(ctx)
+	q := d.db.NewUpdate().Model((*todo)(nil)).Set("completed = ?", boolToInt(completed))
+	q = setCompletedAt(q, completed)
+	res, err := q.Where("id IN (?)", bun.In(ids)).Exec(ctx)
 	if err != nil {
 		return models.Todo{}, err
 	}
@@ -694,6 +734,7 @@ func (d *DB) spawnNextIfRecurring(ctx context.Context, id int64) error {
 		return err
 	}
 	nextDate := next
+	createdAt := nowRFC3339()
 	clone := todo{
 		BoardID:     src.BoardID,
 		Title:       src.Title,
@@ -703,6 +744,7 @@ func (d *DB) spawnNextIfRecurring(ctx context.Context, id int64) error {
 		Priority:    src.Priority,
 		DueDate:     &nextDate,
 		Recurrence:  src.Recurrence,
+		CreatedAt:   &createdAt,
 	}
 	if err := tx.NewInsert().Model(&clone).Returning("id").Scan(ctx, &clone.ID); err != nil {
 		return fmt.Errorf("insert recurring clone: %w", err)
@@ -739,6 +781,24 @@ func toNullString(p *string) any {
 		return nil
 	}
 	return *p
+}
+
+// nowRFC3339 returns the current time as canonical UTC RFC3339 text, the
+// storage format for the todos timestamp columns.
+func nowRFC3339() string {
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
+// setCompletedAt stamps the completed_at assignment onto an update query.
+// Completing keeps an existing timestamp (COALESCE) so the parent completion
+// cascade re-completing an already-completed descendant — or a client
+// re-POSTing completion — does not move its first completion time; only a
+// fresh transition from incomplete stamps now. Un-completing clears it.
+func setCompletedAt(q *bun.UpdateQuery, completed bool) *bun.UpdateQuery {
+	if completed {
+		return q.Set("completed_at = COALESCE(completed_at, ?)", nowRFC3339())
+	}
+	return q.Set("completed_at = ?", nil)
 }
 
 // priorityValue maps an optional priority to its bind value: nil (clear) or
@@ -809,6 +869,7 @@ func (d *DB) Update(ctx context.Context, id int64, in models.UpdateTodo) (models
 	}
 	if in.Completed != nil {
 		q = q.Set("completed = ?", boolToInt(*in.Completed))
+		q = setCompletedAt(q, *in.Completed)
 	}
 	if in.DueDateSet {
 		q = q.Set("due_date = ?", toNullString(in.DueDate)) // nil clears the column

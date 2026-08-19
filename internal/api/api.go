@@ -265,6 +265,10 @@ func (h *Handler) createTodo(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := validateCreatedAt(in.CreatedAt); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	if in.Labels == nil {
 		in.Labels = []string{}
 	}
@@ -746,6 +750,22 @@ func validateDueRecurrence(due *string, rc *models.Recurrence) error {
 	if rc != nil && !rc.Valid() {
 		return fmt.Errorf("%w: invalid recurrence", db.ErrInvalidInput)
 	}
+	return nil
+}
+
+// validateCreatedAt checks the optional creation timestamp on the create input
+// and canonicalises it in place to UTC RFC3339, the storage format. Absent or
+// empty is accepted (the db then defaults it to now); a non-empty value must
+// parse as RFC3339 or the request is rejected with HTTP 400.
+func validateCreatedAt(in *string) error {
+	if in == nil || *in == "" {
+		return nil
+	}
+	ts, err := time.Parse(time.RFC3339, *in)
+	if err != nil {
+		return fmt.Errorf("%w: createdAt must be an RFC3339 timestamp", db.ErrInvalidInput)
+	}
+	*in = ts.UTC().Format(time.RFC3339)
 	return nil
 }
 
