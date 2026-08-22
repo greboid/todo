@@ -324,7 +324,7 @@
     if (e.key === 'Escape') {
       e.preventDefault();
       closeLabelPicker();
-    } else if (e.key === ' ') {
+    } else if (e.key === ' ' || e.key === ',') {
       e.preventDefault();
       commitLabelQuery();
     }
@@ -337,13 +337,13 @@
     }
   }
 
-  // The edit form embeds the label view: Enter/Space commits the typeahead
-  // query, Escape cancels the whole edit like the other form fields.
+  // The edit form embeds the label view: Enter/Space/Comma commits the
+  // typeahead query, Escape cancels the whole edit like the other form fields.
   function onEditLabelInputKeydown(e) {
     if (e.key === 'Escape') {
       e.preventDefault();
       cancelEdit();
-    } else if (e.key === 'Enter' || e.key === ' ') {
+    } else if (e.key === 'Enter' || e.key === ' ' || e.key === ',') {
       e.preventDefault();
       if (labelQuery.trim()) {
         commitLabelQuery();
