@@ -71,8 +71,10 @@ jobs:
       - uses: actions/docker-login@master
         with:
           audience: u:1:ae6cffaa-2fde-4833-8e6b-93316b34299c
+          ghcr: ${{ secrets.MIRROR_TOKEN }}
       - name: Build and push image
         uses: actions/docker-push@master
         with:
           tags: ${{ steps.tags.outputs.tags }}
           file: Containerfile
+          ghcr: true
