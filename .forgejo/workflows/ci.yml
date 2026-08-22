@@ -17,7 +17,7 @@ jobs:
   test:
     name: Vet, build, and test
     runs-on: alpine
-    if: (github.ref == 'refs/heads/master'))
+    if: (github.ref == 'refs/heads/master')
     env:
       CGO_ENABLED: '0'
     steps:
