@@ -62,7 +62,7 @@ jobs:
           separator: ' '
       - uses: actions/docker-login@master
         with:
-          audience: u:1:ae6cffaa-2fde-4833-8e6b-93316b34299c
+          audience: u:1:b9293ba2-f8a7-439e-a788-a9107b7e3ea4
           ghcr: ${{ secrets.MIRROR_TOKEN }}
       - name: Build and push image
         uses: actions/docker-push@master
