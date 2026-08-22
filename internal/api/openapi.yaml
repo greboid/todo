@@ -2,6 +2,9 @@ openapi: 3.0.3
 info:
   title: Todo API
   version: 1.0.0
+  license:
+    name: MIT
+    url: https://spdx.org/licenses/MIT.html
   description: |
     JSON API for a single-binary todo app: todos grouped into boards, with
     subtasks (parent/child), labels, ordering, Todoist-style due dates and
@@ -199,6 +202,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Board" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       tags: [Boards]
       operationId: createBoard
@@ -272,6 +276,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/SavedSearch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       tags: [Saved searches]
       operationId: createSavedSearch
@@ -318,6 +323,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Label" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/labels/{name}:
     parameters:
@@ -405,6 +411,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Priority" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/priorities/{name}:
     parameters:
@@ -567,6 +574,7 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
 components:
   parameters:
