@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { store } from './lib/store.svelte.js';
   import TodoItem from './lib/TodoItem.svelte';
+  import TodoDetail from './lib/TodoDetail.svelte';
   import NewTodo from './lib/NewTodo.svelte';
   import BoardSwitcher from './lib/BoardSwitcher.svelte';
   import BoardModal from './lib/BoardModal.svelte';
@@ -31,7 +32,22 @@
   }
 
   function onWindowKeydown(e) {
-    if (e.key === 'Escape' && menuOpen) menuOpen = false;
+    if (e.key !== 'Escape') return;
+    if (menuOpen) {
+      menuOpen = false;
+      return;
+    }
+    // Modals handle their own Escape (their handlers run first but don't stop
+    // propagation), so only close the detail page when none is open.
+    if (
+      store.detailId != null &&
+      !boardModalOpen &&
+      !labelModalOpen &&
+      !priorityModalOpen &&
+      !helpModalOpen
+    ) {
+      store.closeDetail();
+    }
   }
 
   // "2026-08-16" -> "Aug 16" (with the year when it differs from this one).
@@ -141,7 +157,11 @@
   {/if}
 </header>
 
-{#if store.activeBoard}
+{#if store.detailId != null}
+  <!-- The detail page replaces the list body; the header stays so sync
+       status and the tools remain available. -->
+  <TodoDetail />
+{:else if store.activeBoard}
   <NewTodo placeholder="Add a top-level todo…" onAdd={onAddRoot} />
 
   <div class="list-toolbar">

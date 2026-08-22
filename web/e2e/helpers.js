@@ -43,7 +43,7 @@ export async function updateTodo(base, id, patch, key = '') {
 }
 
 export async function addTodoApi(base, boardId, title, key = '') {
-  await jsonOrThrow(
+  return jsonOrThrow(
     await fetch(`${base}/api/todos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders(key) },
