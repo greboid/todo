@@ -1,7 +1,6 @@
 <script>
   import { store, labelColor } from './store.svelte.js';
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
+  import { renderDescription } from './markdown.js';
   import NewTodo from './NewTodo.svelte';
   import Icon from './Icon.svelte';
   import Calendar from './Calendar.svelte';
@@ -9,25 +8,6 @@
   import { focus } from './actions.js';
   import { api } from './api.js';
   import { firstLink, hostLabel } from './links.js';
-
-  marked.use({
-    gfm: true,
-    breaks: true,
-    renderer: {
-      link({ href, tokens }) {
-        const text = this.parser.parseInline(tokens);
-        return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
-      },
-    },
-  });
-  function renderDescription(md) {
-    const raw = marked.parse(md ?? '', { async: false });
-    return DOMPurify.sanitize(raw, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote', 'a', 'hr'],
-      ALLOWED_ATTR: ['href', 'target', 'rel'],
-      ALLOW_DATA_ATTR: false,
-    });
-  }
 
   let { todo } = $props();
   // editing is driven by the global single-edit slot in the store.
@@ -94,6 +74,24 @@
   function menuAction(fn) {
     store.closeContextMenu();
     fn();
+  }
+
+  // The Details entry is a real link (href=/todo/<id>) so the browser's
+  // link affordances all work: middle/ctrl/cmd/shift-click open it in a new
+  // tab or window, right-click offers "copy link", etc. Those clicks keep
+  // the default behaviour; only a plain left click is intercepted to route
+  // through the SPA instead of reloading the document.
+  function onDetailClick(e) {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    store.closeContextMenu();
+    store.openDetail(todo.id);
+  }
+
+  // Middle clicks surface as auxclick, not click: let the browser open the
+  // link natively and just dismiss the menu behind it.
+  function onDetailAuxClick(e) {
+    if (e.button === 1) store.closeContextMenu();
   }
 
   function onWindowClick(e) {
@@ -844,6 +842,14 @@
       <button type="button" role="menuitem" onclick={() => menuAction(() => (addingChild = !addingChild))}>
         <Icon name="plus" size={16} /> Add child
       </button>
+      <a
+        role="menuitem"
+        href="/todo/{todo.id}"
+        onclick={onDetailClick}
+        onauxclick={onDetailAuxClick}
+      >
+        <Icon name="external-link" size={16} /> Details
+      </a>
       {#if store.boards.length > 1}
         <button
           type="button"
@@ -1212,7 +1218,8 @@
     border-radius: 8px;
     box-shadow: 0 4px 14px var(--shadow);
   }
-  .context-menu button {
+  .context-menu button,
+  .context-menu a {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1222,8 +1229,12 @@
     border-radius: 4px;
     font-size: 13px;
     text-align: left;
+    color: var(--text);
+    text-decoration: none;
+    cursor: pointer;
   }
-  .context-menu button:hover {
+  .context-menu button:hover,
+  .context-menu a:hover {
     background: var(--drop);
     color: var(--accent-strong);
   }

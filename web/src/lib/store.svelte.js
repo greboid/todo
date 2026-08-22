@@ -52,6 +52,28 @@ function labelColor(name, color) {
   return LABEL_PALETTE[Math.abs(hash) % LABEL_PALETTE.length];
 }
 
+// Detail-page route: '/todo/42' (optional trailing slash) → 42, any other
+// path → null. Ids are positive integers — offline temp ids are negative and
+// never routable.
+export function parseDetailPath(pathname) {
+  const m = /^\/todo\/(\d+)\/?$/.exec(pathname ?? '');
+  return m && Number(m[1]) > 0 ? Number(m[1]) : null;
+}
+
+// Ancestor chain of `id` within a flat todo list, ordered root → direct
+// parent. The length cap keeps a malformed (cyclic) hierarchy from looping.
+function parentChain(list, id) {
+  const byIdMap = new Map(list.map((t) => [t.id, t]));
+  const chain = [];
+  let cur = byIdMap.get(id);
+  while (cur && cur.parentId != null && chain.length < list.length) {
+    cur = byIdMap.get(cur.parentId);
+    if (!cur) break;
+    chain.unshift(cur);
+  }
+  return chain;
+}
+
 export const store = createStore();
 export { labelColor, LABEL_PALETTE };
 
@@ -90,6 +112,22 @@ function createStore() {
   // coordinates (the menu is rendered position:fixed by the owning item).
   let contextMenu = $state(null);
 
+  // --- Detail page (/todo/<id>) ---
+  // detailId is the todo being shown (null = list view). detailTodo is the
+  // snapshot fetched for the page; parents/children are the unfiltered
+  // hierarchy around it (the active list is board-scoped and filtered, so it
+  // can't supply these). detailFromApp marks history entries pushed by
+  // openDetail — their back target is in-app, so the page's back button can
+  // use history.back() instead of pushing a list URL.
+  let detailId = $state(null);
+  let detailTodo = $state(null);
+  let detailParents = $state([]);
+  let detailChildren = $state([]);
+  let detailLoading = $state(false);
+  let detailError = $state('');
+  let detailFromApp = false;
+  let detailSeq = 0;
+
   // --- Filter ---
   // The list filter is evaluated entirely server-side (GET /api/todos?filter=).
   // Syntax: label:<name>, date:<preset|YYYY-MM-DD|range>, has:<complete|label|
@@ -119,9 +157,23 @@ function createStore() {
 
   // --- URL sync ---
   // board and filter are mirrored into the query string so views are
-  // shareable/bookmarkable and navigable via back/forward.
+  // shareable/bookmarkable and navigable via back/forward. The detail page
+  // lives on its own path (/todo/<id>), parsed alongside the params.
   function readURLParams() {
     try {
+      const detail = parseDetailPath(window.location.pathname);
+      if (detail != null) {
+        // History entries pushed by openDetail carry a state marker; popstate
+        // fires after the entry swaps, so reading it here reflects the entry
+        // now being shown and keeps the back-button strategy correct.
+        detailFromApp = !!(window.history.state && window.history.state.todoDetail);
+        if (detailId !== detail) {
+          resetDetail(detail);
+          fetchDetail(detail);
+        }
+        return;
+      }
+      if (detailId != null) resetDetail(null);
       const params = new URLSearchParams(window.location.search);
       const board = params.get('board');
       const filter = params.get('filter');
@@ -141,7 +193,17 @@ function createStore() {
     urlTimer = setTimeout(doSyncURL, 1000);
   }
 
+  // Apply a queued list-URL push now instead of after the debounce, or drop
+  // it when the detail route is active (list params don't belong there).
+  function flushURLSync() {
+    if (urlTimer == null) return;
+    clearTimeout(urlTimer);
+    urlTimer = null;
+    if (detailId == null) doSyncURL();
+  }
+
   function doSyncURL() {
+    if (detailId != null) return; // the detail route owns the URL while shown
     try {
       const params = new URLSearchParams(window.location.search);
       let changed = false;
@@ -253,6 +315,146 @@ function createStore() {
 
   function closeContextMenu() {
     contextMenu = null;
+  }
+
+  // --- Detail page operations ---
+
+  function resetDetail(id) {
+    detailId = id;
+    detailTodo = null;
+    detailParents = [];
+    detailChildren = [];
+    detailError = '';
+    detailLoading = id != null;
+  }
+
+  // Navigate to /todo/<id>. The list (with any open editor) unmounts, so a
+  // pending edit is closed first — opening details is a deliberate action,
+  // the edit isn't left dangling in the background.
+  function openDetail(id) {
+    if (id == null) return;
+    flushURLSync();
+    endEdit();
+    contextMenu = null;
+    detailFromApp = true;
+    resetDetail(id);
+    try {
+      window.history.pushState({ todoDetail: id }, '', `/todo/${id}`);
+    } catch {
+      /* history unavailable — the view still switches */
+    }
+    fetchDetail(id);
+  }
+
+  function closeDetail() {
+    if (detailId == null) return;
+    if (detailFromApp) {
+      // The previous entry is the list the user came from; popstate reruns
+      // readURL + load on the App side.
+      try {
+        window.history.back();
+        return;
+      } catch {
+        /* fall through to the manual exit */
+      }
+    }
+    // Cold deep link: no in-app entry to return to, so push the todo's board
+    // as the list URL and run the transition directly (pushState fires no
+    // popstate).
+    const boardId = detailTodo?.boardId ?? activeBoardId;
+    detailFromApp = false;
+    try {
+      window.history.pushState(null, '', boardId ? `/?board=${boardId}` : '/');
+    } catch {
+      /* ignore */
+    }
+    readURLParams();
+    load();
+  }
+
+  // Load the detail page for `id`. getTodo works regardless of the active
+  // board or filter; the unfiltered board tree supplies the parent chain and
+  // the full child set (the active list is filtered — completed children are
+  // hidden by default — so it can't answer either). Any fetch failure falls
+  // back to the projected list, which also covers offline todos that only
+  // exist locally under a temp id.
+  async function fetchDetail(id) {
+    const seq = ++detailSeq;
+    detailLoading = true;
+    detailError = '';
+    try {
+      const fetched = await api.getTodo(id);
+      if (seq !== detailSeq) return;
+      detailTodo = fetched;
+      let tree = null;
+      try {
+        tree = (await api.listTodos(fetched.boardId, '', todayISO())) ?? [];
+      } catch {
+        /* offline or failed: derive what we can from the loaded list */
+      }
+      if (seq !== detailSeq) return;
+      applyDetailTree(tree ?? todos, id);
+    } catch (e) {
+      if (seq !== detailSeq) return;
+      if (e.status === undefined || e.status === 404) {
+        const projected = byId(id);
+        if (projected) {
+          applyDetailFallback(projected);
+        } else {
+          detailTodo = null;
+          detailError =
+            e.status === 404 ? 'Todo not found. It may have been deleted.' : `Couldn't load the todo: ${e.message}`;
+        }
+      } else {
+        detailTodo = null;
+        detailError = e.message;
+      }
+    } finally {
+      if (seq === detailSeq) detailLoading = false;
+    }
+  }
+
+  function applyDetailTree(list, id) {
+    // Tree rows carry the same enrichment as getTodo; prefer the row so the
+    // snapshot and the hierarchy always come from one fetch.
+    const self = list.find((t) => t.id === id);
+    if (self) detailTodo = self;
+    detailChildren = list.filter((t) => t.parentId === id).sort(byPositionThenId);
+    detailParents = parentChain(list, id);
+  }
+
+  function applyDetailFallback(projected) {
+    detailTodo = projected;
+    detailChildren = todos.filter((t) => t.parentId === projected.id).sort(byPositionThenId);
+    detailParents = parentChain(todos, projected.id);
+  }
+
+  // Complete/uncomplete from the detail page. Mirrors setCompleted (same
+  // /complete endpoint, offline intent queueing) but works from the page's
+  // snapshot when the todo isn't in the active list. Completing a recurring
+  // todo respawns the next instance, so both views refetch afterwards.
+  async function setDetailCompleted(completed) {
+    const id = detailId;
+    if (id == null) return;
+    const cur = byId(id) ?? detailTodo;
+    if (!cur || cur.completed === completed) return;
+    if (offline.isTempId(id)) {
+      offline.enqueueComplete(cur, completed);
+      detailTodo = { ...cur, completed };
+      return;
+    }
+    try {
+      await api.completeTodo(id, completed);
+    } catch (e) {
+      if (e.status === undefined) {
+        offline.enqueueComplete(cur, completed);
+        detailTodo = { ...cur, completed };
+        return;
+      }
+      detailError = e.message;
+      return;
+    }
+    await Promise.all([load(), detailId === id ? fetchDetail(id) : Promise.resolve()]);
   }
 
   function reproject() {
@@ -619,6 +821,9 @@ function createStore() {
     clearTimeout(syncTimer);
     syncTimer = setTimeout(() => {
       load();
+      // The detail page may show a todo outside the active list; refresh it
+      // from its own sources too.
+      if (detailId != null) fetchDetail(detailId);
     }, 300);
   }
 
@@ -766,6 +971,24 @@ function createStore() {
     get contextMenu() {
       return contextMenu;
     },
+    get detailId() {
+      return detailId;
+    },
+    get detailTodo() {
+      return detailTodo;
+    },
+    get detailParents() {
+      return detailParents;
+    },
+    get detailChildren() {
+      return detailChildren;
+    },
+    get detailLoading() {
+      return detailLoading;
+    },
+    get detailError() {
+      return detailError;
+    },
     get filterText() {
       return filterText;
     },
@@ -797,6 +1020,9 @@ function createStore() {
     markEditDirty,
     openContextMenu,
     closeContextMenu,
+    openDetail,
+    closeDetail,
+    setDetailCompleted,
     childrenOf,
     visibleChildrenOf,
     byId,
