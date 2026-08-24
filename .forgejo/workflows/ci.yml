@@ -21,9 +21,9 @@ jobs:
     env:
       CGO_ENABLED: '0'
     steps:
-      - uses: actions/toolkit/checkout@master
-      - uses: actions/toolkit/setup-go@master
-      - uses: actions/toolkit/setup-node@master
+      - uses: actions/toolkit/git-checkout@master
+      - uses: actions/toolkit/go-setup@master
+      - uses: actions/toolkit/node-setup@master
         with:
           working-dir: web
       - name: Install SPA dependencies
@@ -52,14 +52,7 @@ jobs:
     if: success() && github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: alpine
     steps:
-      - uses: actions/toolkit/checkout@master
-      - name: Generate tags
-        id: tags
-        uses: actions/toolkit/image-tags@master
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          registries: git.mouse-lake.ts.net
-          separator: ' '
+      - uses: actions/toolkit/git-checkout@master
       - uses: actions/toolkit/docker-login@master
         with:
           audience: u:1:b9293ba2-f8a7-439e-a788-a9107b7e3ea4
