@@ -634,7 +634,7 @@
         draggable={!editing}
         ondragstart={onDragStart}
         ondragend={onDragEnd}
-      >☰
+      ><Icon name="grip" size={14} />
       </span>
       {#if todo.description}
         <button
@@ -899,10 +899,19 @@
 <style>
   .item {
     background: var(--panel);
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-soft);
     border-radius: 8px;
-    padding: 8px 10px;
-    margin: 4px 0;
+    padding: 11px 12px;
+    margin: 6px 0;
+    box-shadow: 0 1px 3px var(--shadow);
+    transition:
+      border-color 0.15s,
+      background 0.15s,
+      box-shadow 0.15s;
+  }
+  /* Distinct hover tint so the row under the pointer reads immediately. */
+  .item:hover {
+    background: var(--hover);
   }
   .item.drop-before {
     border-top: 3px solid var(--accent);
@@ -927,7 +936,9 @@
     cursor: pointer;
   }
   .title {
-    font-weight: 500;
+    font-size: 15px;
+    font-weight: 600;
+    transition: color 0.2s;
   }
   .done .title,
   .done .detail {
@@ -1009,8 +1020,6 @@
     width: 16px;
     cursor: grab;
     color: var(--muted);
-    font-size: 16px;
-    line-height: 1;
     opacity: 0.5;
     user-select: none;
     -webkit-user-select: none;
@@ -1261,7 +1270,7 @@
      nesting keeps some width. */
   @media (max-width: 720px) {
     .item {
-      padding: 8px;
+      padding: 9px 10px;
     }
     .head {
       gap: 6px;

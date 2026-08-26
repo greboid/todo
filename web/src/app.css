@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  --bg: #f7f7f8;
+  --bg: #f1f2f4;
   --panel: #ffffff;
   --line: #e3e3e8;
   --accent: #3b82f6;
@@ -19,6 +19,8 @@
   --link-line: #99f6e4;
   --raised: #fbfdff;
   --shadow: rgba(0, 0, 0, 0.08);
+  --hover: #e9edf4;
+  --line-soft: rgba(227, 227, 232, 0.6);
 }
 
 /* System theme: dark when the OS prefers it, unless the user forced light. */
@@ -44,6 +46,8 @@
     --link-line: #2d5a53;
     --raised: #232330;
     --shadow: rgba(0, 0, 0, 0.45);
+    --hover: #242436;
+    --line-soft: rgba(49, 49, 58, 0.5);
   }
 }
 
@@ -67,8 +71,10 @@
   --link: #5eead4;
   --link-tint: #12302d;
   --link-line: #2d5a53;
-  --raised: #232330;
-  --shadow: rgba(0, 0, 0, 0.45);
+    --raised: #232330;
+    --shadow: rgba(0, 0, 0, 0.45);
+    --hover: #242436;
+    --line-soft: rgba(49, 49, 58, 0.5);
 }
 
 * {
@@ -94,6 +100,11 @@ button {
   color: var(--text);
   border-radius: 6px;
   padding: 4px 10px;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s,
+    color 0.15s;
 }
 
 button.action-btn {
@@ -148,4 +159,44 @@ ul {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+/* Custom checkbox: rounded, accent-filled when checked. */
+input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+input[type='checkbox']:hover {
+  border-color: var(--accent);
+}
+input[type='checkbox']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type='checkbox']::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  transform: scale(0);
+  transition: transform 0.12s ease-in-out;
+  /* Checkmark drawn as an SVG so the box can stay sized purely in CSS. */
+  background: no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5 6.5 12 13 4.5' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain;
+}
+input[type='checkbox']:checked::before {
+  transform: scale(1);
 }
