@@ -8,6 +8,7 @@
   import { focus } from './actions.js';
   import { api } from './api.js';
   import { firstLink, hostLabel } from './links.js';
+  import { formatDay } from './format.js';
 
   let { todo } = $props();
   // editing is driven by the global single-edit slot in the store.
@@ -679,7 +680,7 @@
           {/if}
           {#if todo.dueDate}
             {@const overdue = !todo.completed && todo.dueDate < todayISO()}
-            <span class="badge due {overdue ? 'overdue' : ''}"><Icon name="calendar" size={12} /> {todo.dueDate}</span>
+            <span class="badge due {overdue ? 'overdue' : ''}" title={todo.dueDate}><Icon name="calendar" size={12} /> {formatDay(todo.dueDate)}</span>
           {/if}
           {#if todo.recurrence}
             <span class="badge recur" title={todo.recurrenceLabel}><Icon name="repeat" size={12} /> {todo.recurrence.fromCompletion ? 'every!' : 'every'} {todo.recurrenceLabel}</span>
