@@ -226,9 +226,11 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel);
+    padding: 16px 20px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    background: color-mix(in srgb, var(--panel) 85%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
   .header-row {
     display: flex;
@@ -237,7 +239,9 @@
     position: relative; /* anchors the mobile toolbar popout */
   }
   h1 {
-    font-size: 18px;
+    font-size: 20px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
     margin: 0;
   }
   .app-icon {
@@ -335,7 +339,7 @@
      visible without opening the menu. */
   @media (max-width: 720px) {
     header {
-      padding: 10px 12px;
+      padding: 12px 12px 10px;
     }
     .header-row .muted,
     .header-row .error {

@@ -94,6 +94,13 @@
     <line x1="4" y1="6" x2="20" y2="6" />
     <line x1="4" y1="12" x2="20" y2="12" />
     <line x1="4" y1="18" x2="20" y2="18" />
+  {:else if name === 'grip'}
+    <circle cx="9" cy="5" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="5" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="19" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="19" r="1.5" fill="currentColor" stroke="none" />
   {/if}
 </svg>
 
