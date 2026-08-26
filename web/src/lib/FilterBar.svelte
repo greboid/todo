@@ -67,7 +67,9 @@
   .pill.invalid {
     border-color: var(--danger);
   }
-  .pill-icon {
+  /* The class lives on the Icon child component's svg, so :global is needed
+     for the parent's scoped selector to reach it. */
+  .pill :global(.pill-icon) {
     flex-shrink: 0;
     color: var(--muted);
   }

@@ -311,7 +311,10 @@
     flex-direction: column;
     gap: 8px;
   }
-  .empty-icon {
+  /* The class lives on the Icon child component's svg, so :global is needed
+     for the parent's scoped selector to reach it. */
+  .empty-filter :global(.empty-icon),
+  .no-boards :global(.empty-icon) {
     color: var(--muted);
     opacity: 0.7;
   }
