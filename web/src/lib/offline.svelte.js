@@ -497,6 +497,7 @@ async function replay(intent) {
         if (res.priority) payload.priority = res.priority;
         if (res.dueDate) payload.dueDate = res.dueDate;
         if (res.recurrence) payload.recurrence = res.recurrence;
+        if (res.noSchedule) payload.noSchedule = true;
       }
       const parentId = resolveParent(intent.parentId ?? payload.parentId);
       delete payload.parentId;

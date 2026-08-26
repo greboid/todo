@@ -566,7 +566,7 @@ function createStore() {
     }
   }
 
-  async function create({ title, description = '', parentId = null, labels = [], priority = '', dueDate = null, recurrence = null, rawText = null }) {
+  async function create({ title, description = '', parentId = null, labels = [], priority = '', dueDate = null, recurrence = null, noSchedule = false, rawText = null }) {
     const payload = {
       title,
       description,
@@ -580,6 +580,8 @@ function createStore() {
     }
     if (dueDate) payload.dueDate = dueDate;
     if (recurrence) payload.recurrence = recurrence;
+    // Explicit "no due date": skips a server-configured default (-default-due).
+    if (noSchedule) payload.noSchedule = true;
     let created;
     try {
       created = await api.createTodo(payload);

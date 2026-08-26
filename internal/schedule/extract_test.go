@@ -96,6 +96,38 @@ func TestExtractEmpty(t *testing.T) {
 	}
 }
 
+// TestExtractNever covers the explicit "no due date" keyword: it must strip
+// from the title and set NoSchedule so a server-side default (-default-due)
+// is skipped, while "never" in any other position stays part of the title.
+func TestExtractNever(t *testing.T) {
+	qa, ok := Extract("buy milk never", extractNow)
+	if !ok {
+		t.Fatal(`Extract("buy milk never") ok=false, want true`)
+	}
+	if qa.Title != "buy milk" {
+		t.Errorf("title = %q, want %q", qa.Title, "buy milk")
+	}
+	if !qa.NoSchedule {
+		t.Error("NoSchedule = false, want true")
+	}
+	if qa.Schedule.DueDate != "" || qa.Schedule.Recurrence != nil {
+		t.Errorf("schedule set: dueDate=%q recurrence=%+v", qa.Schedule.DueDate, qa.Schedule.Recurrence)
+	}
+
+	for _, in := range []string{"never again", "buy milk", "never ever"} {
+		qa, ok := Extract(in, extractNow)
+		if ok && (qa.NoSchedule || qa.Title == "") {
+			t.Errorf("Extract(%q): NoSchedule=%t title=%q; 'never' must only match as a whole trailing token", in, qa.NoSchedule, qa.Title)
+		}
+	}
+
+	// The parse endpoint must also accept the bare keyword (ok, empty).
+	s, err := Parse("never", extractNow)
+	if err != nil || s.DueDate != "" || s.Recurrence != nil {
+		t.Errorf(`Parse("never") = %+v, %v; want empty schedule, nil error`, s, err)
+	}
+}
+
 func equalInts(a, b []int) bool {
 	if len(a) != len(b) {
 		return false

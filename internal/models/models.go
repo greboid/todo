@@ -198,7 +198,10 @@ type CreateTodo struct {
 	Priority    string      `json:"priority,omitempty"`
 	DueDate     *string     `json:"dueDate,omitempty"`
 	Recurrence  *Recurrence `json:"recurrence,omitempty"`
-	CreatedAt   *string     `json:"createdAt,omitempty"`
+	// NoSchedule is the explicit opt-out from a server-configured default due
+	// date (-default-due): this todo has no due date on purpose.
+	NoSchedule bool    `json:"noSchedule,omitempty"`
+	CreatedAt  *string `json:"createdAt,omitempty"`
 }
 
 // OptionalParent captures the three-way distinction encoding/json cannot

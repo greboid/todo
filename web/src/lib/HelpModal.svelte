@@ -87,6 +87,9 @@
       <dt><code>starting sep 1</code> <code>ending dec 31</code> <code>for 6 weeks</code></dt>
       <dd>recurrence window; without a start date the first due date is the rule's
         first occurrence</dd>
+      <dt><code>never</code></dt>
+      <dd>no due date on purpose; skips the server default (if one is configured
+        via <code>-default-due</code>)</dd>
     </dl>
     <p class="hint">
       Completing a repeating todo spawns the next occurrence. Times (<code>at 3pm</code>,
