@@ -6,14 +6,21 @@
 </script>
 
 <div class="filter">
-  <input
-    type="text"
-    class="search"
-    class:invalid={store.filterError}
-    placeholder="Filter: !has:complete label:work priority:high date:week …  (or just type to search)"
-    value={store.filterText}
-    oninput={(e) => store.setFilterText(e.target.value)}
-  />
+  <div class="pill" class:invalid={store.filterError}>
+    <Icon name="search" size={14} class="pill-icon" />
+    <input
+      type="text"
+      class="search"
+      placeholder="Filter: !has:complete label:work priority:high date:week …  (or just type to search)"
+      value={store.filterText}
+      oninput={(e) => store.setFilterText(e.target.value)}
+    />
+    {#if store.filterActive}
+      <button class="ghost clear" title="Clear filter" onclick={() => store.clearFilter()}>
+        <Icon name="close" size={14} />
+      </button>
+    {/if}
+  </div>
   {#if activeSorts(store.filterText).length > 0}
     <div class="sort-chips" role="group" aria-label="Active sorts">
       {#each activeSorts(store.filterText) as s, i (s.raw + i)}
@@ -24,13 +31,6 @@
         </span>
       {/each}
     </div>
-  {/if}
-  {#if store.filterActive}
-    <button class="ghost clear action-btn" title="Clear filter" onclick={() => store.clearFilter()}>
-      <Icon name="close" size={14} />
-    </button>
-  {:else}
-    <span class="action-btn placeholder" aria-hidden="true"></span>
   {/if}
   {#if store.filterError}
     <span class="filter-error" role="alert">{store.filterError}</span>
@@ -44,17 +44,55 @@
     gap: 8px;
     position: relative;
   }
-  .search {
+  /* Same shape as the quick-add bar and todo cards; a raised background and
+     inset icon keep it visually quieter than the row above. */
+  .pill {
     flex: 1;
     min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
   }
-  .search.invalid {
-    outline: 2px solid var(--danger);
-    outline-offset: -1px;
+  .pill:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-tint);
+  }
+  .pill.invalid {
     border-color: var(--danger);
+  }
+  .pill-icon {
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+  .search {
+    flex: 1;
+    width: auto;
+    border: none;
+    background: transparent;
+    padding: 8px 0;
+    min-width: 0;
+  }
+  .search:focus {
+    outline: none;
   }
   .clear {
     flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    color: var(--muted);
   }
   .sort-chips {
     display: flex;
@@ -92,7 +130,7 @@
     color: var(--danger);
     background: var(--danger-tint);
     border: 1px solid var(--danger);
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 4px 8px;
     font-size: 12px;
     line-height: 1.4;

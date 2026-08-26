@@ -98,7 +98,7 @@ button {
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 4px 10px;
   transition:
     border-color 0.15s,
@@ -142,7 +142,7 @@ input[type='text'],
 textarea {
   font: inherit;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 8px;
   background: var(--panel);
   color: var(--text);

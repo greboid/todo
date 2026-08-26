@@ -1222,7 +1222,7 @@
   }
   .suggestions {
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--panel);
     max-height: 220px;
     overflow: auto;

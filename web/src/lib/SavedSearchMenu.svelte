@@ -167,7 +167,7 @@
     display: flex;
     flex-direction: column;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
     overflow: hidden;
   }
   .search-row {
@@ -240,7 +240,7 @@
     color: var(--danger);
     background: var(--danger-tint);
     border: 1px solid var(--danger);
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 4px 8px;
     font-size: 12px;
     line-height: 1.4;

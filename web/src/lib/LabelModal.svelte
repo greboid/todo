@@ -183,7 +183,7 @@
     max-height: 360px;
     overflow-y: auto;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
   }
   .label-row {
     display: flex;
