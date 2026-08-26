@@ -282,10 +282,10 @@
     margin: 2px 0 0;
     padding: 4px;
     list-style: none;
-    background: var(--bg, #fff);
-    border: 1px solid var(--border, #ddd);
+    background: var(--panel);
+    border: 1px solid var(--line);
     border-radius: 6px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 14px var(--shadow);
     max-height: 220px;
     overflow-y: auto;
     min-width: 140px;
@@ -298,7 +298,7 @@
     white-space: nowrap;
   }
   .popup li.active {
-    background: var(--accent, #3b82f6);
+    background: var(--accent);
     color: #fff;
   }
   .popup li .hash {

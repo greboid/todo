@@ -908,17 +908,31 @@
     transition:
       border-color 0.15s,
       background 0.15s,
-      box-shadow 0.15s;
+      box-shadow 0.15s,
+      opacity 0.25s;
+  }
+  /* Whole-card fade including children, so completed subtrees visibly
+     recede while staying readable if expanded. */
+  .item.done {
+    opacity: 0.7;
   }
   /* Distinct hover tint so the row under the pointer reads immediately. */
   .item:hover {
     background: var(--hover);
   }
+  /* Drop indicators are inset box-shadows rather than thicker borders, so
+     they don't change layout mid-drag (a growing border nudged every row
+     below the pointer exactly when aiming mattered most). The card's rest
+     shadow is preserved alongside them. */
   .item.drop-before {
-    border-top: 3px solid var(--accent);
+    box-shadow:
+      inset 0 3px 0 var(--accent),
+      0 1px 3px var(--shadow);
   }
   .item.drop-after {
-    border-bottom: 3px solid var(--accent);
+    box-shadow:
+      inset 0 -3px 0 var(--accent),
+      0 1px 3px var(--shadow);
   }
   .item.drop-into {
     background: var(--drop);
@@ -939,17 +953,28 @@
   .title {
     font-size: 15px;
     font-weight: 600;
-    transition: color 0.2s;
+    /* The line is always "on" but transparent until done, so completing a
+       todo animates the strike drawing in rather than popping it on. */
+    text-decoration: line-through transparent;
+    transition:
+      color 0.25s,
+      text-decoration-color 0.25s;
   }
   .done .title,
   .done .detail {
-    text-decoration: line-through;
+    text-decoration-color: var(--muted);
     color: var(--muted);
+    transition:
+      color 0.25s,
+      text-decoration-color 0.25s;
   }
   .detail {
     color: var(--muted);
     margin: 6px 0 2px;
     word-break: break-word;
+    /* Always-on transparent strike, animated on completion like .title. */
+    text-decoration: line-through transparent;
+    transition: text-decoration-color 0.25s;
     /* A flex child of .head: always claims its own line, after the row's
        other lines (browsers keep it last on desktop via DOM order). */
     flex-basis: 100%;
@@ -961,7 +986,7 @@
   }
   .detail :global(code) {
     font-family: ui-monospace, monospace;
-    background: var(--bg-elevated, rgba(0, 0, 0, 0.05));
+    background: var(--bg);
     border-radius: 3px;
     padding: 0 4px;
   }
@@ -982,7 +1007,7 @@
   .detail :global(blockquote) {
     margin: 6px 0;
     padding-left: 0.8em;
-    border-left: 3px solid var(--border, rgba(0, 0, 0, 0.1));
+    border-left: 3px solid var(--line);
   }
   .detail :global(p) {
     margin: 4px 0;
@@ -1069,7 +1094,9 @@
   .badge.overdue {
     background: var(--danger-tint);
     color: var(--danger);
-    border-color: var(--danger);
+    /* Softer than a full-strength border so it doesn't shout next to the
+       tint-style badges; still clearly urgent from the red text. */
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
   }
   .badge.recur {
     background: var(--recur-tint);
@@ -1098,6 +1125,20 @@
     margin-left: auto;
     display: inline-flex;
     gap: 2px;
+    /* Faded out at rest to declutter the row; space stays reserved so
+       nothing shifts when they fade back in. */
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .item:hover .actions,
+  .item:focus-within .actions {
+    opacity: 1;
+  }
+  /* Touch devices never hover: keep the actions permanently visible. */
+  @media (hover: none) {
+    .actions {
+      opacity: 1;
+    }
   }
   .actions button {
     padding: 2px 6px;

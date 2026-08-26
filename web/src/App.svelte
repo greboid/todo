@@ -73,7 +73,7 @@
 <header>
   <div class="header-row">
     <img class="app-icon" src="/icon.svg" alt="" width="24" height="24" />
-    <h1>Todo</h1>
+    <h1>Todo<span class="dot" aria-hidden="true"></span></h1>
     {#if store.loading}<span class="muted">Loading…</span>{/if}
     {#if store.error}<span class="error">{store.error}</span>{/if}
     <div class="header-side">
@@ -162,6 +162,7 @@
 
   {#if store.filterActive && roots.length === 0}
     <div class="empty-filter">
+      <Icon name="search" size={28} class="empty-icon" />
       <span class="muted">No todos match the current filter.</span>
       <button class="ghost" onclick={() => store.clearFilter()}>Show all</button>
     </div>
@@ -190,6 +191,7 @@
   </ul>
 {:else if !store.loading}
   <div class="no-boards">
+    <Icon name="board" size={32} class="empty-icon" />
     <p class="muted">No boards yet. Create one to start adding todos.</p>
     <button class="primary" onclick={() => (boardModalOpen = true)}>
       <Icon name="board" size={16} /> Create a board
@@ -235,6 +237,16 @@
     font-weight: 650;
     letter-spacing: -0.01em;
     margin: 0;
+    display: inline-flex;
+    align-items: baseline;
+  }
+  /* Small accent mark giving the plain wordmark a bit of identity. */
+  .dot {
+    width: 6px;
+    height: 6px;
+    margin-left: 3px;
+    border-radius: 50%;
+    background: var(--accent);
   }
   .app-icon {
     display: block;
@@ -294,19 +306,31 @@
     flex-direction: column;
     gap: 8px;
   }
+  .empty-icon {
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  /* Empty states fill and center in whatever space remains below the
+     toolbar (#app is a full-height flex column), so they read as
+     intentional rather than a stub at the top of an empty page. */
   .empty-filter {
+    flex: 1;
     padding: 24px 20px;
     display: flex;
+    flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 12px;
     color: var(--muted);
     font-size: 13px;
   }
   .no-boards {
+    flex: 1;
     padding: 48px 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 12px;
   }
   .no-boards p {
@@ -319,8 +343,8 @@
     gap: 6px;
   }
   .roots {
+    flex: 1;
     padding: 12px 20px;
-    min-height: 60vh;
   }
   .roots > li {
     margin-bottom: 8px;
