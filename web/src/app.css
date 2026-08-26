@@ -71,10 +71,10 @@
   --link: #5eead4;
   --link-tint: #12302d;
   --link-line: #2d5a53;
-    --raised: #232330;
-    --shadow: rgba(0, 0, 0, 0.45);
-    --hover: #242436;
-    --line-soft: rgba(49, 49, 58, 0.5);
+  --raised: #232330;
+  --shadow: rgba(0, 0, 0, 0.45);
+  --hover: #242436;
+  --line-soft: rgba(49, 49, 58, 0.5);
 }
 
 * {
@@ -155,10 +155,28 @@ textarea:focus {
   outline-offset: -1px;
 }
 
+/* Consistent keyboard-focus ring everywhere else: buttons, the title
+   spans marked role=button, links, and other interactive elements.
+   :focus-visible skips pointer clicks but still catches tab navigation;
+   the negative offset keeps the ring inside small controls. */
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
 ul {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+/* Full-height column so empty states can center in the leftover space. */
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 /* Custom checkbox: rounded, accent-filled when checked. */

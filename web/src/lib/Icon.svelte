@@ -3,11 +3,11 @@
   // inconsistently or invisibly across system fonts. Icons live on a 24×24
   // grid, stroke-width 2, round caps/joins (Lucide convention), and use
   // currentColor so they inherit the surrounding button/badge color.
-  let { name, size = 16 } = $props();
+  let { name, size = 16, class: cls = '' } = $props();
 </script>
 
 <svg
-  class="icon"
+  class="icon {cls}"
   width={size}
   height={size}
   viewBox="0 0 24 24"
