@@ -950,6 +950,10 @@
     flex-wrap: wrap;
     cursor: pointer;
   }
+  /* A little extra air between the checkbox and the title it belongs to. */
+  .head > input[type='checkbox'] {
+    margin-right: 6px;
+  }
   .title {
     font-size: 15px;
     font-weight: 600;
