@@ -166,7 +166,9 @@ dates resolve against the day of creation: with `-default-due "every monday"`,
 a todo added on a Wednesday is due the following Monday. Todos created through
 any client (web UI or API) get the default; one that already carries a
 `dueDate` or recurrence — e.g. from a trailing schedule in the quick-add text —
-is left alone.
+is left alone. To deliberately skip the default, end the quick-add line with
+the keyword `never` (`buy milk never`) or send `noSchedule: true` on the API
+call; the todo is then created with no due date.
 
 ### SQLite (default)
 

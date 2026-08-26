@@ -38,6 +38,7 @@
     const parts = [];
     if (preview.labels?.length) parts.push(preview.labels.map((l) => `#${l}`).join(' '));
     if (preview.priority) parts.push(`@${preview.priority}`);
+    if (preview.noSchedule) parts.push('no due date');
     if (preview.scheduleText) parts.push(`→ ${preview.scheduleText}`);
     return parts.length ? parts.join('   ') : null;
   });
@@ -173,6 +174,7 @@
     if (res.priority) payload.priority = res.priority;
     if (res.dueDate) payload.dueDate = res.dueDate;
     if (res.recurrence) payload.recurrence = res.recurrence;
+    if (res.noSchedule) payload.noSchedule = true;
     await onAdd?.(payload);
     text = '';
     preview = null;

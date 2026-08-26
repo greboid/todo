@@ -85,7 +85,8 @@ paths:
         configured default schedule is applied and stamped onto the created
         todo. The default string is parsed at creation time, so relative forms
         such as `tomorrow` or `every monday` resolve against the day the todo
-        is created.
+        is created. Send `noSchedule: true` to skip the default for one todo
+        (the web UI does this when quick-add text ends in `never`).
       requestBody:
         required: true
         content:
@@ -545,6 +546,8 @@ paths:
         priority "high", due tomorrow; `Pay rent every month on the 1st` → title
         "Pay rent", monthly recurrence). Send the client's local `today`
         (YYYY-MM-DD) so relative dates resolve from the user's perspective.
+        Input ending in the keyword `never` is the explicit no-due-date
+        opt-out; the response then sets `noSchedule` instead of a schedule.
         Always returns 200.
       requestBody:
         required: true
@@ -812,6 +815,12 @@ components:
           description: "YYYY-MM-DD."
         recurrence:
           $ref: "#/components/schemas/Recurrence"
+        noSchedule:
+          type: boolean
+          description: >
+            Explicit opt-out from the server's default due date
+            (`-default-due`): send true when this todo must have no due date on
+            purpose, e.g. when the quick-add text ended in `never`.
         createdAt:
           type: string
           format: date-time
@@ -1093,3 +1102,9 @@ components:
         scheduleText:
           type: string
           description: Canonical free-text rendering of the trailing schedule; absent when none.
+        noSchedule:
+          type: boolean
+          description: >
+            True when the input ended in the explicit `never` keyword: the todo
+            has no due date on purpose, which skips a server-configured
+            `-default-due` when creating it. Absent otherwise.

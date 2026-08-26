@@ -70,6 +70,15 @@ func TestCreateTodoDefaultDue(t *testing.T) {
 	if got.Recurrence != nil {
 		t.Errorf("recurrence = %+v, want none", got.Recurrence)
 	}
+
+	// An explicit noSchedule opt-out skips the default.
+	w, got = post(`{"boardId":1,"title":"opted out","noSchedule":true}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create with noSchedule: status = %d, want %d (body %s)", w.Code, http.StatusCreated, w.Body)
+	}
+	if got.DueDate != "" {
+		t.Errorf("dueDate = %q, want empty despite -default-due", got.DueDate)
+	}
 }
 
 func TestCreateTodoCreatedAt(t *testing.T) {

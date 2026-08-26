@@ -277,8 +277,9 @@ func (h *Handler) createTodo(w http.ResponseWriter, r *http.Request) {
 	}
 	// When the client sent no schedule of its own and a server default is
 	// configured, stamp the default in before validation. Parsed per request
-	// so relative dates resolve against the creation day.
-	if in.DueDate == nil && in.Recurrence == nil && h.defaultDue != "" {
+	// so relative dates resolve against the creation day. An explicit
+	// noSchedule opt-out wins: that todo has no due date on purpose.
+	if in.DueDate == nil && in.Recurrence == nil && !in.NoSchedule && h.defaultDue != "" {
 		sched, err := schedule.Parse(h.defaultDue, time.Now().UTC())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, fmt.Errorf("configured default due: %w", err))
@@ -858,8 +859,9 @@ func (h *Handler) extractSchedule(w http.ResponseWriter, r *http.Request) {
 		DueDate      string             `json:"dueDate,omitempty"`
 		Recurrence   *models.Recurrence `json:"recurrence,omitempty"`
 		ScheduleText string             `json:"scheduleText,omitempty"`
+		NoSchedule   bool               `json:"noSchedule,omitempty"`
 	}
-	resp := extractResponse{OK: ok, Title: qa.Title, Labels: nonNil(qa.Labels), Priority: qa.Priority}
+	resp := extractResponse{OK: ok, Title: qa.Title, Labels: nonNil(qa.Labels), Priority: qa.Priority, NoSchedule: qa.NoSchedule}
 	if ok && (qa.Schedule.DueDate != "" || qa.Schedule.Recurrence != nil) {
 		resp.DueDate = qa.Schedule.DueDate
 		resp.Recurrence = qa.Schedule.Recurrence

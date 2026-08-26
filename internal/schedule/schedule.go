@@ -647,11 +647,22 @@ func computeEnd(startISO, duration string) (string, bool) {
 // top-level schedule parser
 // ----------------------------------------------------------------------------
 
+// noneKeyword is the explicit "no due date" token. Unlike blank input it is a
+// positive statement: clients send noSchedule=true so a server-side default
+// due date (-default-due) is skipped for this todo.
+const noneKeyword = "never"
+
+// IsNone reports whether raw is the explicit "no due date" keyword.
+func IsNone(raw string) bool {
+	return normalize(raw) == noneKeyword
+}
+
 // Parse turns the combined due/recurrence field into a structured Schedule.
-// Empty input clears both (zero DueDate, nil Recurrence, nil error).
+// Empty input clears both (zero DueDate, nil Recurrence, nil error), as does
+// the explicit "never" keyword.
 func Parse(raw string, now time.Time) (Schedule, error) {
 	text := normalize(raw)
-	if text == "" {
+	if text == "" || text == noneKeyword {
 		return Schedule{}, nil
 	}
 	// "repeat" is accepted as a synonym for "every": it is trimmed, and the
@@ -733,12 +744,16 @@ func Parse(raw string, now time.Time) (Schedule, error) {
 }
 
 // QuickAdd is the parsed result of a quick-add line: a title, any #label tags,
-// a single @priority, and an optional trailing schedule.
+// a single @priority, and an optional trailing schedule. NoSchedule is set
+// when the trailing token was the explicit "never" keyword: the todo has no
+// schedule on purpose, which must survive even where a server default due
+// date applies to schedule-less creates.
 type QuickAdd struct {
-	Title    string
-	Labels   []string
-	Priority string
-	Schedule Schedule
+	Title      string
+	Labels     []string
+	Priority   string
+	Schedule   Schedule
+	NoSchedule bool
 }
 
 // Extract parses a quick-add line into a title, optional #label tags, and an
@@ -767,6 +782,9 @@ func Extract(raw string, now time.Time) (QuickAdd, bool) {
 	}
 	toks := strings.Fields(body)
 	for k := 1; k < len(toks); k++ {
+		if IsNone(toks[k]) && k == len(toks)-1 {
+			return QuickAdd{Title: strings.Join(toks[:k], " "), Labels: labels, Priority: priority, NoSchedule: true}, true
+		}
 		s, err := Parse(strings.Join(toks[k:], " "), now)
 		if err != nil || (s.DueDate == "" && s.Recurrence == nil) {
 			continue
