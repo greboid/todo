@@ -135,7 +135,7 @@ function createStore() {
   // Defaults to "!has:complete" (hide completed). Persisted. May also be set
   // from the URL (?filter=<text>) which takes precedence over the stored value.
   // An invalid token makes the API return 400, surfaced here as filterError.
-  let filterText = $state(storage.get('todo:filter') || '!has:complete');
+  let filterText = $state(storage.get('todo:filter') ?? '!has:complete');
   let filterError = $state('');
   let filterTimer = null;
 
@@ -213,9 +213,11 @@ function createStore() {
         else params.delete('board');
         changed = true;
       }
+      // The empty filter is meaningful ("show everything"), so mirror it as
+      // filter= rather than dropping the param — deleting it would lose the
+      // distinction from the unvisited/default case.
       if (!filterError && params.get('filter') !== filterText) {
-        if (filterText) params.set('filter', filterText);
-        else params.delete('filter');
+        params.set('filter', filterText);
         changed = true;
       }
       if (changed) {
