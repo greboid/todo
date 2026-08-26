@@ -86,7 +86,7 @@ paths:
         todo. The default string is parsed at creation time, so relative forms
         such as `tomorrow` or `every monday` resolve against the day the todo
         is created. Send `noSchedule: true` to skip the default for one todo
-        (the web UI does this when quick-add text ends in `never`).
+        (the web UI does this when quick-add text ends in `never` or `due never`).
       requestBody:
         required: true
         content:
@@ -546,7 +546,7 @@ paths:
         priority "high", due tomorrow; `Pay rent every month on the 1st` → title
         "Pay rent", monthly recurrence). Send the client's local `today`
         (YYYY-MM-DD) so relative dates resolve from the user's perspective.
-        Input ending in the keyword `never` is the explicit no-due-date
+        Input ending in the keyword `never` (optionally qualified as `due never`) is the explicit no-due-date
         opt-out; the response then sets `noSchedule` instead of a schedule.
         Always returns 200.
       requestBody:
@@ -1105,6 +1105,6 @@ components:
         noSchedule:
           type: boolean
           description: >
-            True when the input ended in the explicit `never` keyword: the todo
+            True when the input ended in the explicit `never` (or `due never`) keyword: the todo
             has no due date on purpose, which skips a server-configured
             `-default-due` when creating it. Absent otherwise.

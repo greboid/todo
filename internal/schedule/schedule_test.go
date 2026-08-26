@@ -62,6 +62,15 @@ func TestParse(t *testing.T) {
 		{"end of aug", "end of aug", Schedule{DueDate: "2026-08-31"}, ""},
 		{"this weekend", "this weekend", Schedule{DueDate: "2026-08-15"}, ""},
 
+		// optional leading "due" qualifier
+		{"due friday", "due friday", Schedule{DueDate: "2026-08-14"}, ""},
+		{"due next monday", "due next monday", Schedule{DueDate: "2026-08-10"}, ""},
+		{"due aug 15", "due aug 15", Schedule{DueDate: "2026-08-15"}, ""},
+		{"due weekly", "due weekly", Schedule{DueDate: "2026-08-09", Recurrence: rc(models.Recurrence{Frequency: "weekly", Interval: 1})}, ""},
+		{"due never", "due never", Schedule{}, ""},
+		{"bare due", "due", Schedule{}, "couldn't read a date"},
+		{"overdue is not a qualifier", "overdue", Schedule{}, "couldn't read a date"},
+
 		// "a <span> <day>" relative dates: coming anchor day plus the span
 		// (now is a Sunday, so the coming Monday is 08-10).
 		{"a week on monday", "a week on monday", Schedule{DueDate: "2026-08-17"}, ""},
