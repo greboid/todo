@@ -166,6 +166,11 @@
       <span class="muted">No todos match the current filter.</span>
       <button class="ghost" onclick={() => store.clearFilter()}>Show all</button>
     </div>
+  {:else if !store.filterActive && roots.length === 0}
+    <div class="empty-filter">
+      <Icon name="check" size={28} class="empty-icon" />
+      <span class="muted">Nothing here yet — add your first todo above.</span>
+    </div>
   {/if}
 
   <ul
@@ -250,7 +255,7 @@
   }
   .app-icon {
     display: block;
-    border-radius: 6px;
+    border-radius: 8px;
   }
   .muted {
     color: var(--muted);

@@ -283,7 +283,7 @@
     flex-direction: column;
     gap: 0;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
   }
   .priority-row {
     display: flex;
@@ -394,7 +394,7 @@
   }
   .adhoc-list {
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
   }
   .adhoc-row {
     display: flex;

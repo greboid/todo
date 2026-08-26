@@ -66,7 +66,7 @@
     padding: 2px;
     margin-right: 4px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--raised);
   }
   .seg {

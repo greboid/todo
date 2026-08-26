@@ -127,7 +127,7 @@
     font-size: 12px;
     border: 1px solid transparent;
     background: transparent;
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--text);
   }
   .cal-day.out {

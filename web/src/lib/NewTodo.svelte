@@ -230,34 +230,36 @@
 </script>
 
 <form class="row" onsubmit={submit}>
-  <div class="field">
-    <input
-      type="text"
-      bind:this={inputEl}
-      bind:value={text}
-      {placeholder}
-      onkeydown={onKeydown}
-      oninput={onInput}
-      onblur={() => setTimeout(closeDropdown, 120)}
-      use:focus
-    />
-    {#if suggestions.length}
-      <ul class="popup" role="listbox">
-        {#each suggestions as name, i (name)}
-          <li
-            role="option"
-            aria-selected={i === labelState.index}
-            class:active={i === labelState.index}
-            onmousedown={(e) => { e.preventDefault(); onSuggestionClick(name); }}
-            onmouseenter={() => (labelState = { ...labelState, index: i })}
-          >
-            <span class="hash">{currentToken(inputEl)?.prefix ?? '#'}</span>{name}
-          </li>
-        {/each}
-      </ul>
-    {/if}
+  <div class="bar">
+    <div class="field">
+      <input
+        type="text"
+        bind:this={inputEl}
+        bind:value={text}
+        {placeholder}
+        onkeydown={onKeydown}
+        oninput={onInput}
+        onblur={() => setTimeout(closeDropdown, 120)}
+        use:focus
+      />
+      {#if suggestions.length}
+        <ul class="popup" role="listbox">
+          {#each suggestions as name, i (name)}
+            <li
+              role="option"
+              aria-selected={i === labelState.index}
+              class:active={i === labelState.index}
+              onmousedown={(e) => { e.preventDefault(); onSuggestionClick(name); }}
+              onmouseenter={() => (labelState = { ...labelState, index: i })}
+            >
+              <span class="hash">{currentToken(inputEl)?.prefix ?? '#'}</span>{name}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+    <button type="submit" class="primary action-btn" disabled={!canSubmit}>Add</button>
   </div>
-  <button type="submit" class="primary action-btn" disabled={!canSubmit}>Add</button>
   {#if shownFeedback}
     <span class="preview">{shownFeedback}</span>
   {/if}
@@ -269,6 +271,49 @@
     gap: 8px;
     padding: 12px 20px;
     align-items: center;
+  }
+  /* Quick-add reads as one control: a joined input/button group whose focus
+     ring wraps the whole bar rather than just the text field. */
+  .bar {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  .bar:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-tint);
+  }
+  .bar .field {
+    flex: 1;
+    min-width: 0;
+  }
+  .bar input {
+    border: none;
+    border-radius: 10px 0 0 10px;
+    background: transparent;
+    padding: 9px 4px 9px 12px;
+  }
+  .bar input:focus {
+    outline: none;
+  }
+  .bar button {
+    align-self: stretch;
+    border: none;
+    border-radius: 0 9px 9px 0;
+    height: auto;
+    padding: 0 16px;
+    flex-shrink: 0;
+  }
+  .bar button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .field {
     position: relative;
@@ -284,7 +329,7 @@
     list-style: none;
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
     box-shadow: 0 4px 14px var(--shadow);
     max-height: 220px;
     overflow-y: auto;

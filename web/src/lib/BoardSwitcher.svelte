@@ -26,7 +26,7 @@
   .tab {
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 4px 10px;
     color: var(--muted);
     max-width: 160px;
