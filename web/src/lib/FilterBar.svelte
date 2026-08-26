@@ -53,7 +53,7 @@
     align-items: center;
     gap: 6px;
     padding: 0 8px;
-    background: var(--raised);
+    background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 10px;
     transition:
