@@ -652,9 +652,16 @@ func computeEnd(startISO, duration string) (string, bool) {
 // due date (-default-due) is skipped for this todo.
 const noneKeyword = "never"
 
-// IsNone reports whether raw is the explicit "no due date" keyword.
+// dueQualifier is the optional leading "due" that Parse strips before parsing
+// the rest of the phrase.
+const dueQualifier = "due"
+
+// IsNone reports whether raw is the explicit "no due date" keyword, with an
+// optional leading "due" qualifier ("due never").
 func IsNone(raw string) bool {
-	return normalize(raw) == noneKeyword
+	text := normalize(raw)
+	text = strings.TrimPrefix(text, dueQualifier+" ")
+	return text == noneKeyword
 }
 
 // Parse turns the combined due/recurrence field into a structured Schedule.
@@ -662,6 +669,10 @@ func IsNone(raw string) bool {
 // the explicit "never" keyword.
 func Parse(raw string, now time.Time) (Schedule, error) {
 	text := normalize(raw)
+	// A leading "due" is an optional spoken-style qualifier ("due friday",
+	// "due every monday", "due never"); drop it so the rest parses normally.
+	// It must be followed by something, so words like "overdue" don't match.
+	text = strings.TrimPrefix(text, dueQualifier+" ")
 	if text == "" || text == noneKeyword {
 		return Schedule{}, nil
 	}
@@ -782,7 +793,9 @@ func Extract(raw string, now time.Time) (QuickAdd, bool) {
 	}
 	toks := strings.Fields(body)
 	for k := 1; k < len(toks); k++ {
-		if IsNone(toks[k]) && k == len(toks)-1 {
+		noneTail := k == len(toks)-1 && IsNone(toks[k]) ||
+			k == len(toks)-2 && normalize(toks[k]) == dueQualifier && IsNone(toks[k+1])
+		if noneTail {
 			return QuickAdd{Title: strings.Join(toks[:k], " "), Labels: labels, Priority: priority, NoSchedule: true}, true
 		}
 		s, err := Parse(strings.Join(toks[k:], " "), now)

@@ -47,6 +47,8 @@ func TestExtract(t *testing.T) {
 		{"fortnight alone becomes title", "in a fortnight", "in a fortnight", nil, "", false, "", 0, nil, nil},
 		{"spacing collapsed", "buy   milk   tomorrow", "buy milk", nil, "2026-08-11", false, "", 0, nil, nil},
 		{"case preserved in title", "Buy Milk Tomorrow", "Buy Milk", nil, "2026-08-11", false, "", 0, nil, nil},
+		{"due qualifier with date", "pay vat due aug 15", "pay vat", nil, "2026-08-15", false, "", 0, nil, nil},
+		{"due qualifier with recurrence", "standup due every weekday", "standup", nil, "", true, "weekly", 1, []int{1, 2, 3, 4, 5}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -112,6 +114,18 @@ func TestExtractNever(t *testing.T) {
 	}
 	if qa.Schedule.DueDate != "" || qa.Schedule.Recurrence != nil {
 		t.Errorf("schedule set: dueDate=%q recurrence=%+v", qa.Schedule.DueDate, qa.Schedule.Recurrence)
+	}
+
+	// "due never" is the qualified form of the same keyword.
+	qa, ok = Extract("buy milk due never", extractNow)
+	if !ok {
+		t.Fatal(`Extract("buy milk due never") ok=false, want true`)
+	}
+	if qa.Title != "buy milk" {
+		t.Errorf("title = %q, want %q", qa.Title, "buy milk")
+	}
+	if !qa.NoSchedule {
+		t.Error("NoSchedule = false, want true")
 	}
 
 	for _, in := range []string{"never again", "buy milk", "never ever"} {
