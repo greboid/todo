@@ -21,6 +21,7 @@ import (
 
 	"github.com/greboid/todo/internal/api"
 	"github.com/greboid/todo/internal/db"
+	"github.com/greboid/todo/internal/schedule"
 	"github.com/greboid/todo/internal/ui"
 )
 
@@ -36,8 +37,17 @@ func run() error {
 	addr := flag.String("addr", ":8080", "address the HTTP server listens on")
 	driver := flag.String("db-driver", "sqlite", "database backend: sqlite (also sqlite3) or postgres (also pg/postgresql)")
 	dsn := flag.String("db", "todo.db", "for SQLite, the database file path; for Postgres, a libpq-style connection string")
+	defaultDue := flag.String("default-due", "", "default due/repeating schedule applied to new todos without their own, in the quick-add date grammar (e.g. \"tomorrow\", \"every monday\", \"in 3 days\"); empty means no due date")
 	envflag.Parse(envflag.WithPrefix("TODO_"))
 	_ = slogflags.Logger(slogflags.WithSetDefault(true))
+
+	// Fail fast on an unparsable default rather than rejecting every create
+	// at runtime; parsing again per creation keeps relative dates fresh.
+	if *defaultDue != "" {
+		if _, err := schedule.Parse(*defaultDue, time.Now().UTC()); err != nil {
+			return fmt.Errorf("parse -default-due: %w", err)
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -49,7 +59,7 @@ func run() error {
 	defer func() { _ = store.Close() }()
 
 	mux := http.NewServeMux()
-	handler := api.New(store, *apiKey)
+	handler := api.New(store, *apiKey).WithDefaultDue(*defaultDue)
 	// /api reads are never cached by the browser: the service worker keeps
 	// its own "last good sync" copy, and an intervening HTTP-cache entry
 	// would shadow it. The worker, manifest, and document are revalidated

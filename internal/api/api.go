@@ -101,6 +101,10 @@ type Handler struct {
 	apiKey  string
 	sessKey []byte
 	bus     *eventBus
+	// defaultDue is an optional quick-add schedule string (same grammar as
+	// /api/schedule/parse) applied to created todos that carry no due date or
+	// recurrence of their own. Empty disables the default.
+	defaultDue string
 }
 
 // New returns a configured Handler. apiKey is optional: when empty the API is
@@ -111,6 +115,16 @@ func New(store *db.DB, apiKey string) *Handler {
 	if apiKey != "" {
 		h.sessKey = sessionKey(apiKey)
 	}
+	return h
+}
+
+// WithDefaultDue sets a default due/repeating schedule for new todos. The
+// string is parsed at creation time (not here) so relative forms like
+// "tomorrow" or "every monday" resolve against each todo's creation date.
+// Callers should validate the value with schedule.Parse before wiring it up;
+// this method keeps the existing two-argument New signature intact.
+func (h *Handler) WithDefaultDue(s string) *Handler {
+	h.defaultDue = s
 	return h
 }
 
@@ -260,6 +274,18 @@ func (h *Handler) createTodo(w http.ResponseWriter, r *http.Request) {
 	if in.Title == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("title is required"))
 		return
+	}
+	// When the client sent no schedule of its own and a server default is
+	// configured, stamp the default in before validation. Parsed per request
+	// so relative dates resolve against the creation day.
+	if in.DueDate == nil && in.Recurrence == nil && h.defaultDue != "" {
+		sched, err := schedule.Parse(h.defaultDue, time.Now().UTC())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Errorf("configured default due: %w", err))
+			return
+		}
+		in.DueDate = &sched.DueDate
+		in.Recurrence = sched.Recurrence
 	}
 	if err := validateDueRecurrence(in.DueDate, in.Recurrence); err != nil {
 		writeErr(w, http.StatusBadRequest, err)

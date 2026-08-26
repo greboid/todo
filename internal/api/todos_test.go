@@ -25,6 +25,53 @@ func openTestHandler(t *testing.T) http.Handler {
 	return New(store, "").Routes()
 }
 
+func TestCreateTodoDefaultDue(t *testing.T) {
+	store, err := db.New(context.Background(), "sqlite", filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	h := New(store, "").WithDefaultDue("every monday").Routes()
+
+	post := func(body string) (*httptest.ResponseRecorder, models.Todo) {
+		req := httptest.NewRequest(http.MethodPost, "/api/todos", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		var todo models.Todo
+		if w.Code == http.StatusCreated {
+			if err := json.Unmarshal(w.Body.Bytes(), &todo); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+		}
+		return w, todo
+	}
+
+	// No schedule on the request: the default applies.
+	w, got := post(`{"boardId":1,"title":"defaulted"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create without schedule: status = %d, want %d (body %s)", w.Code, http.StatusCreated, w.Body)
+	}
+	if got.DueDate == "" {
+		t.Error("dueDate is empty, want stamped from -default-due")
+	}
+	if got.Recurrence == nil || got.Recurrence.Frequency != "weekly" || len(got.Recurrence.Weekdays) != 1 {
+		t.Errorf("recurrence = %+v, want weekly on one weekday", got.Recurrence)
+	}
+
+	// An explicit due date wins over the default.
+	w, got = post(`{"boardId":1,"title":"explicit","dueDate":"2026-03-04"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create with explicit dueDate: status = %d, want %d (body %s)", w.Code, http.StatusCreated, w.Body)
+	}
+	if got.DueDate != "2026-03-04" {
+		t.Errorf("dueDate = %q, want 2026-03-04 (the explicit value)", got.DueDate)
+	}
+	if got.Recurrence != nil {
+		t.Errorf("recurrence = %+v, want none", got.Recurrence)
+	}
+}
+
 func TestCreateTodoCreatedAt(t *testing.T) {
 	h := openTestHandler(t)
 	post := func(body string) *httptest.ResponseRecorder {

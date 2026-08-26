@@ -79,6 +79,13 @@ paths:
       tags: [Todos]
       operationId: createTodo
       summary: Create a todo
+      description: >
+        When the request carries neither `dueDate` nor `recurrence` and the
+        server was started with `-default-due` (`TODO_DEFAULT_DUE`), the
+        configured default schedule is applied and stamped onto the created
+        todo. The default string is parsed at creation time, so relative forms
+        such as `tomorrow` or `every monday` resolve against the day the todo
+        is created.
       requestBody:
         required: true
         content:

@@ -24,6 +24,8 @@ as one executable with no external dependencies and no accounts.
   subtree done.
 - **Date-only**. Times (`at 3pm`, `every hour`) are not supported; this keeps
   the grammar simple and unambiguous.
+- **Default due date** (optional): start the server with `-default-due` to
+  stamp a due date or recurrence onto every new todo that doesn't set one.
 
 ### Prerequisites
 
@@ -156,6 +158,15 @@ command-line argument wins when both are given:
 | `-db-driver` | `TODO_DB_DRIVER` | `sqlite` | Database backend: `sqlite` (also `sqlite3`) or `postgres` (also `pg`/`postgresql`) |
 | `-db` | `TODO_DB` | `todo.db` | For SQLite, the database file path; for Postgres, a libpq-style connection string |
 | `-api-key` | `TODO_API_KEY` | _(empty)_ | Optional API key guarding `/api`; requests must send it as an `X-API-Key` header or a Bearer token, while browsers get a session cookie instead (empty disables authentication) |
+| `-default-due` | `TODO_DEFAULT_DUE` | _(empty)_ | Default due/repeating schedule for new todos without one of their own, in the quick-add date grammar (e.g. `"tomorrow"`, `"every monday"`, `"in 3 days"`); empty means no due date |
+
+An invalid `-default-due` value prevents startup. When set, the value is
+re-parsed each time a todo is created without its own schedule, so relative
+dates resolve against the day of creation: with `-default-due "every monday"`,
+a todo added on a Wednesday is due the following Monday. Todos created through
+any client (web UI or API) get the default; one that already carries a
+`dueDate` or recurrence — e.g. from a trailing schedule in the quick-add text —
+is left alone.
 
 ### SQLite (default)
 
