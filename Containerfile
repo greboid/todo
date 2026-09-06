@@ -21,5 +21,6 @@ RUN mkdir -p /rootfs/data && \
 
 FROM ghcr.io/greboid/dockerbase/nonroot:1.20260714.0
 COPY --from=builder /rootfs /
+EXPOSE 8080
 WORKDIR /data
 ENTRYPOINT ["/todo"]
