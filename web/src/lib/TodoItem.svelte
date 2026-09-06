@@ -1095,6 +1095,16 @@
     font-size: 12px;
     white-space: nowrap;
   }
+  /* Priority is the one piece of metadata that should read at a glance.
+     Keep the standard compact badge dimensions and use only a colour-matched
+     leading accent to distinguish it from ordinary tags. */
+  .badge.priority {
+    padding-left: 7px;
+    box-shadow:
+      inset 3px 0 0 currentColor,
+      inset -3px 0 0 currentColor,
+      0 1px 2px color-mix(in srgb, currentColor 16%, transparent);
+  }
   .badge.overdue {
     background: var(--danger-tint);
     color: var(--danger);
