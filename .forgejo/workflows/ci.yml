@@ -56,7 +56,7 @@ jobs:
       - uses: actions/toolkit/docker-login@master
         with:
           audience: u:1:b9293ba2-f8a7-439e-a788-a9107b7e3ea4
-          ghcr: ${{ secrets.MIRROR_TOKEN }}
+          ghcr: ${{ secrets.GHCR_TOKEN }}
       - name: Build and push image
         uses: actions/toolkit/docker-push@master
         with:
