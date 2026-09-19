@@ -2,7 +2,6 @@ package filter
 
 import (
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -173,9 +172,7 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
-// rootOrder returns the root items' IDs in ascending Position order after a
-// sort. Since Sort reorders via Position (not flat slice order), this is the
-// correct way to observe the rendered order.
+// rootOrder returns root IDs in their actual response slice order.
 func rootOrder(board []Item, q Query) []int64 {
 	out := Sort(Apply(board, q, today), q)
 	roots := make([]Item, 0, len(out))
@@ -184,7 +181,6 @@ func rootOrder(board []Item, q Query) []int64 {
 			roots = append(roots, it)
 		}
 	}
-	sort.SliceStable(roots, func(i, j int) bool { return roots[i].Position < roots[j].Position })
 	r := make([]int64, len(roots))
 	for i, it := range roots {
 		r[i] = it.ID
@@ -285,5 +281,45 @@ func TestSortNoKeys(t *testing.T) {
 	out := Sort(in, q)
 	if !reflect.DeepEqual(in, out) {
 		t.Errorf("Sort with no keys should be a no-op")
+	}
+}
+
+func TestSortSiblingSlots(t *testing.T) {
+	parent, child := int64(1), int64(2)
+	in := []Item{
+		{ID: 1, Position: 4, DueDate: "2026-08-20"},
+		{ID: 2, ParentID: &parent, Position: 7, DueDate: "2026-08-20"},
+		{ID: 3, Position: 5, DueDate: "2026-08-10"},
+		{ID: 4, ParentID: &parent, Position: 8, DueDate: "2026-08-10"},
+		{ID: 5, ParentID: &child, Position: 9},
+		{ID: 6, ParentID: &parent, Position: 10, DueDate: "2026-08-10"},
+	}
+	before := append([]Item(nil), in...)
+	q, err := Parse("sort:date")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := Sort(in, q)
+	if got, want := ids(out), []int64{3, 4, 1, 6, 5, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("slice order = %v, want %v", got, want)
+	}
+	positions := map[string]int{}
+	for i, it := range out {
+		if !reflect.DeepEqual(it.ParentID, in[i].ParentID) {
+			t.Errorf("slot %d changed sibling group", i)
+		}
+		original := before[it.ID-1]
+		original.Position = it.Position
+		if !reflect.DeepEqual(it, original) {
+			t.Errorf("item %d changed beyond position: %+v", it.ID, it)
+		}
+		key := parentKey(it.ParentID)
+		if it.Position != positions[key] {
+			t.Errorf("item %d position = %d, want %d", it.ID, it.Position, positions[key])
+		}
+		positions[key]++
+	}
+	if !reflect.DeepEqual(in, before) {
+		t.Error("Sort mutated its input")
 	}
 }

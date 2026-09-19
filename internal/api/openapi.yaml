@@ -59,7 +59,13 @@ paths:
         in internal/filter): the response contains only matching todos plus the
         ancestors that keep the tree connected. The same query accepts
         `sort:<field>` terms that reorder the matching todos within each
-        sibling group. `today` (YYYY-MM-DD) anchors the date presets
+        sibling group. Siblings appear in the response array in rendered order:
+        without sort terms, by stored position then ID; with sort terms, by the
+        requested keys, preserving that manual order for ties. Explicit sorting
+        also assigns zero-based positions within each sibling group in the
+        response only; stored positions and parent relationships are unchanged.
+        The array is flat, not a depth-first tree traversal.
+        `today` (YYYY-MM-DD) anchors the date presets
         (today/tomorrow/week) to the user's local date. A malformed filter
         returns 400.
       parameters:

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -121,5 +123,93 @@ func TestCreateTodoCreatedAt(t *testing.T) {
 	}
 	if got.CompletedAt != "" {
 		t.Errorf("new todo completedAt = %q, want empty", got.CompletedAt)
+	}
+}
+
+func TestListTodosSiblingOrder(t *testing.T) {
+	h := openTestHandler(t)
+	create := func(title, date string, parent *int64, position int) models.Todo {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"boardId": 1, "title": title, "dueDate": date,
+			"parentId": parent, "position": position,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/todos", strings.NewReader(string(body))))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", w.Code, w.Body)
+		}
+		var todo models.Todo
+		if err := json.Unmarshal(w.Body.Bytes(), &todo); err != nil {
+			t.Fatal(err)
+		}
+		return todo
+	}
+	// Creation order deliberately differs from manual position order; equal
+	// dates exercise stable ties in that manual order.
+	a := create("a", "2026-08-20", nil, 0)
+	b := create("b", "2026-08-10", nil, 0)
+	c := create("c", "2026-08-10", nil, 1)
+	x := create("x", "2026-08-20", &a.ID, 0)
+	y := create("y", "2026-08-10", &a.ID, 0)
+	z := create("z", "2026-08-10", &a.ID, 1)
+	grandchild := create("grandchild", "2026-08-01", &x.ID, 4)
+	// Insertion shifted the first-created siblings to the end.
+	a.Position, x.Position = 2, 2
+	for _, tc := range []struct {
+		name, query     string
+		roots, children []int64
+		sorted          bool
+	}{
+		{"default", "", []int64{b.ID, c.ID, a.ID}, []int64{y.ID, z.ID, x.ID}, false},
+		{"filter without sort", "has:date", []int64{b.ID, c.ID, a.ID}, []int64{y.ID, z.ID, x.ID}, false},
+		{"explicit sort", "sort:!date", []int64{a.ID, b.ID, c.ID}, []int64{x.ID, y.ID, z.ID}, true},
+		{"default after sort", "", []int64{b.ID, c.ID, a.ID}, []int64{y.ID, z.ID, x.ID}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/todos?boardId=1&filter="+url.QueryEscape(tc.query), nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("list: %d %s", w.Code, w.Body)
+			}
+			var todos []models.Todo
+			if err := json.Unmarshal(w.Body.Bytes(), &todos); err != nil {
+				t.Fatal(err)
+			}
+			groups := map[int64][]int64{}
+			original := map[int64]models.Todo{}
+			for _, todo := range []models.Todo{a, b, c, x, y, z, grandchild} {
+				original[todo.ID] = todo
+			}
+			if len(todos) != len(original) {
+				t.Fatalf("got %d todos, want %d", len(todos), len(original))
+			}
+			for _, todo := range todos {
+				before, ok := original[todo.ID]
+				if !ok || !reflect.DeepEqual(todo.ParentID, before.ParentID) {
+					t.Fatalf("unexpected hierarchy: %+v", todo)
+				}
+				parent := int64(0)
+				if todo.ParentID != nil {
+					parent = *todo.ParentID
+				}
+				position := before.Position
+				if tc.sorted {
+					position = len(groups[parent])
+				}
+				if todo.Position != position {
+					t.Errorf("todo %d position = %d, want %d", todo.ID, todo.Position, position)
+				}
+				groups[parent] = append(groups[parent], todo.ID)
+			}
+			for parent, want := range map[int64][]int64{0: tc.roots, a.ID: tc.children, x.ID: {grandchild.ID}} {
+				if got := groups[parent]; !reflect.DeepEqual(got, want) {
+					t.Errorf("parent %d slice order = %v, want %v", parent, got, want)
+				}
+			}
+		})
 	}
 }

@@ -445,8 +445,8 @@ func (q Query) Sorts() []SortKey {
 }
 
 // Sort reorders items so each sibling group is sorted by the query's sort keys
-// in declared order, with a stable tie-break on position then id so the
-// pre-existing manual order is preserved for equal keys. It also reassigns
+// in declared order, preserving input order for equal keys (normally the
+// database manual order by position then id). It also reassigns
 // each item's Position to its new 0-based sibling index, so downstream
 // consumers (e.g. the rendered tree) reflect the new order without bespoke
 // handling. When q has no sort keys the slice is returned unchanged.
@@ -458,36 +458,25 @@ func Sort(items []Item, q Query) []Item {
 	if len(q.sorts) == 0 {
 		return items
 	}
-	type entry struct {
-		idx int
-		it  Item
+	// Keep each group's flat slots, but fill them in sorted sibling order.
+	buckets := make(map[string][]Item)
+	for _, it := range items {
+		k := parentKey(it.ParentID)
+		buckets[k] = append(buckets[k], it)
 	}
-	// Group items by parent (nil = root). Bucket key is the string form of the
-	// parent id bytes so roots (nil) share one bucket distinct from id 0.
-	buckets := make(map[string][]entry)
-	keys := make([]string, 0)
+	for _, grp := range buckets {
+		sort.SliceStable(grp, func(i, j int) bool {
+			return lessItem(grp[i], grp[j], q.sorts)
+		})
+	}
+	out := make([]Item, len(items))
+	next := make(map[string]int)
 	for i, it := range items {
 		k := parentKey(it.ParentID)
-		if _, ok := buckets[k]; !ok {
-			keys = append(keys, k)
-		}
-		buckets[k] = append(buckets[k], entry{idx: i, it: it})
-	}
-	for _, k := range keys {
-		grp := buckets[k]
-		sort.SliceStable(grp, func(i, j int) bool {
-			return lessItem(grp[i].it, grp[j].it, q.sorts)
-		})
-		buckets[k] = grp
-	}
-	// Reassign positions within each group; items keep their flat-slot index.
-	out := make([]Item, len(items))
-	copy(out, items)
-	for _, k := range keys {
-		grp := buckets[k]
-		for i, e := range grp {
-			out[e.idx].Position = i
-		}
+		position := next[k]
+		out[i] = buckets[k][position]
+		out[i].Position = position
+		next[k]++
 	}
 	return out
 }
