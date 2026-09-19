@@ -267,12 +267,14 @@ func (d *DB) migrate(ctx context.Context) error {
 		func(ctx context.Context) error {
 			return addColumnIfMissing(ctx, d.db, "predefined_priorities", "position", "INTEGER NOT NULL DEFAULT 0")
 		},
-		// Seed the three default priorities (low, medium, high). Idempotent.
+		// Seed the three default priorities. Position 0 is the highest
+		// precedence (see models.Priority), so the most urgent default comes
+		// first. Idempotent.
 		func(ctx context.Context) error {
 			defaults := []struct {
 				name     string
 				position int
-			}{{"low", 0}, {"medium", 1}, {"high", 2}}
+			}{{"high", 0}, {"medium", 1}, {"low", 2}}
 			for _, def := range defaults {
 				if _, err := d.db.NewInsert().Model(&predefinedPriority{Name: def.name, Position: def.position}).
 					On("CONFLICT (name) DO NOTHING").Exec(ctx); err != nil {

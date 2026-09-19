@@ -345,6 +345,42 @@ describe('detectClash', () => {
 // --- optimistic projection (via the public enqueue surface) ---
 
 describe('projection', () => {
+  it('preserves server order without local structural changes', () => {
+    const server = [
+      { ...wireTodo(), id: 9, position: 0 },
+      { ...wireTodo(), id: 10, parentId: 9, position: 0 },
+      { ...wireTodo(), id: 8, position: 1 },
+    ];
+    const ids = (list) => list.map((t) => t.id);
+    expect(ids(offline.project(server))).toEqual([9, 10, 8]);
+    offline.enqueueUpdate(server[0], { title: 'Edited offline' });
+    offline.enqueueComplete(server[2], true);
+    expect(ids(offline.project(server))).toEqual([9, 10, 8]);
+    offline.enqueueDelete(server[1]);
+    expect(ids(offline.project(server))).toEqual([9, 8]);
+  });
+
+  it('orders queued additions after existing siblings, with the existing temp-id tie-break', () => {
+    const server = [{ ...wireTodo(), position: 0 }];
+    const first = offline.enqueueCreate({ boardId: 1, payload: { title: 'First' } });
+    const second = offline.enqueueCreate({ boardId: 1, payload: { title: 'Second' } });
+    expect(offline.project(server).map((t) => t.id)).toEqual([7, second, first]);
+    expect(server.map((t) => t.id)).toEqual([7]);
+  });
+
+  it('orders siblings after a queued move without mutating the server list', () => {
+    const server = [
+      { ...wireTodo(), id: 7, position: 0 },
+      { ...wireTodo(), id: 8, position: 1 },
+      { ...wireTodo(), id: 9, parentId: 7, position: 0 },
+    ];
+    offline.enqueueMove(server[0], { parentId: null, position: 2 });
+    const projected = offline.project(server);
+    expect(projected.filter((t) => t.parentId == null).map((t) => t.id)).toEqual([8, 7]);
+    expect(projected.filter((t) => t.parentId === 7).map((t) => t.id)).toEqual([9]);
+    expect(server.map((t) => t.position)).toEqual([0, 1, 0]);
+  });
+
   it('projects a queued create as a pending todo with defaults', () => {
     const tempId = offline.enqueueCreate({
       boardId: 1,

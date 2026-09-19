@@ -242,10 +242,9 @@ function createStore() {
   }
 
   function childrenOf(parentId) {
-    // parentId === null means top-level roots.
-    return todos
-      .filter((t) => (parentId === null ? t.parentId == null : t.parentId === parentId))
-      .sort(byPositionThenId);
+    // parentId === null means top-level roots. Preserve the API's sibling
+    // order; offline projection handles any locally queued additions/moves.
+    return todos.filter((t) => (parentId === null ? t.parentId == null : t.parentId === parentId));
   }
 
   // Display view of children. The server already applied the filter (matching
@@ -421,13 +420,13 @@ function createStore() {
     // snapshot and the hierarchy always come from one fetch.
     const self = list.find((t) => t.id === id);
     if (self) detailTodo = self;
-    detailChildren = list.filter((t) => t.parentId === id).sort(byPositionThenId);
+    detailChildren = list.filter((t) => t.parentId === id);
     detailParents = parentChain(list, id);
   }
 
   function applyDetailFallback(projected) {
     detailTodo = projected;
-    detailChildren = todos.filter((t) => t.parentId === projected.id).sort(byPositionThenId);
+    detailChildren = todos.filter((t) => t.parentId === projected.id);
     detailParents = parentChain(todos, projected.id);
   }
 

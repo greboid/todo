@@ -412,6 +412,7 @@ function project(serverTodos) {
 
 function projectInner(serverTodos) {
   const list = serverTodos.map((t) => ({ ...t }));
+  let orderChanged = false;
   const find = (id) => list.find((x) => x.id === id || (isTempId(id) && resolveId(id) === x.id));
 
   for (const intent of queued) {
@@ -435,6 +436,7 @@ function projectInner(serverTodos) {
           recurrence: intent.payload.recurrence ?? null,
           pending: true,
         });
+        orderChanged = true;
         break;
       }
       case 'update': {
@@ -468,12 +470,17 @@ function projectInner(serverTodos) {
         todo.parentId = intent.parentId ?? null;
         if (intent.position != null) todo.position = intent.position;
         todo.pending = true;
+        orderChanged = true;
         break;
       }
       default:
         throw new Error(`unknown intent kind: ${intent?.kind}`);
     }
   }
+  // Server lists already carry sibling order. Only local structural changes
+  // need the position/id fallback previously applied by every rendered view.
+  // Do not duplicate the server's filter/sort grammar for offline edits.
+  if (orderChanged) list.sort((a, b) => a.position - b.position || a.id - b.id);
   return list;
 }
 
