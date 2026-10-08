@@ -7,7 +7,8 @@ import (
 	"github.com/greboid/todo/internal/models"
 )
 
-func ptr[T any](v T) *T { return &v }
+//go:fix inline
+func ptr[T any](v T) *T { return new(v) }
 
 func TestUpdateTodoUnmarshal(t *testing.T) {
 	tests := []struct {
@@ -19,19 +20,19 @@ func TestUpdateTodoUnmarshal(t *testing.T) {
 			name: "scalars and labels",
 			raw:  `{"title":"edited","description":"d","labels":["a","b"],"completed":true,"position":2}`,
 			want: models.UpdateTodo{
-				Title:       ptr("edited"),
-				Description: ptr("d"),
-				Completed:   ptr(true),
-				Position:    ptr(2),
-				Labels:      ptr([]string{"a", "b"}),
+				Title:       new("edited"),
+				Description: new("d"),
+				Completed:   new(true),
+				Position:    new(2),
+				Labels:      new([]string{"a", "b"}),
 			},
 		},
 		{
 			name: "parentId value sets OptionalParent",
 			raw:  `{"title":"x","parentId":5}`,
 			want: models.UpdateTodo{
-				Title:          ptr("x"),
-				OptionalParent: models.OptionalParent{Set: true, ID: ptr(int64(5))},
+				Title:          new("x"),
+				OptionalParent: models.OptionalParent{Set: true, ID: new(int64(5))},
 			},
 		},
 		{
@@ -45,7 +46,7 @@ func TestUpdateTodoUnmarshal(t *testing.T) {
 			name: "absent parentId leaves parent unchanged",
 			raw:  `{"title":"y"}`,
 			want: models.UpdateTodo{
-				Title:          ptr("y"),
+				Title:          new("y"),
 				OptionalParent: models.OptionalParent{Set: false},
 			},
 		},
@@ -84,15 +85,15 @@ func TestMoveTodoUnmarshal(t *testing.T) {
 		raw  string
 		want models.MoveTodo
 	}{
-		{name: "position only", raw: `{"position":3}`, want: models.MoveTodo{Position: ptr(3)}},
+		{name: "position only", raw: `{"position":3}`, want: models.MoveTodo{Position: new(3)}},
 		{name: "parent value", raw: `{"parentId":2,"position":0}`,
-			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true, ID: ptr(int64(2))}, Position: ptr(0)}},
+			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true, ID: new(int64(2))}, Position: new(0)}},
 		{name: "parent null", raw: `{"parentId":null,"position":1}`,
-			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true}, Position: ptr(1)}},
+			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true}, Position: new(1)}},
 		{name: "board move", raw: `{"boardId":7,"parentId":null}`,
-			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true}, BoardID: ptr(int64(7))}},
+			want: models.MoveTodo{OptionalParent: models.OptionalParent{Set: true}, BoardID: new(int64(7))}},
 		{name: "boardId null leaves board unchanged", raw: `{"boardId":null,"position":2}`,
-			want: models.MoveTodo{Position: ptr(2)}},
+			want: models.MoveTodo{Position: new(2)}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

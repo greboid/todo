@@ -87,8 +87,8 @@ func lookupWeekday(tok string) (int, bool) {
 	if w, ok := weekdays[tok]; ok {
 		return w, true
 	}
-	if strings.HasSuffix(tok, "s") {
-		if w, ok := weekdays[strings.TrimSuffix(tok, "s")]; ok {
+	if before, ok := strings.CutSuffix(tok, "s"); ok {
+		if w, ok := weekdays[before]; ok {
 			return w, true
 		}
 	}
@@ -212,8 +212,8 @@ func spannedDay(weeks int, anchor string, now time.Time) (time.Time, bool) {
 }
 
 func singularUnit(tok string) string {
-	if strings.HasSuffix(tok, "s") {
-		return strings.TrimSuffix(tok, "s")
+	if before, ok := strings.CutSuffix(tok, "s"); ok {
+		return before
 	}
 	return tok
 }
@@ -1014,10 +1014,7 @@ func monthCandidates(year int, month time.Month, base time.Time, rc models.Recur
 	// No explicit targets: keep the base day-of-month (plain "every month"),
 	// clamping to the last day when the month is shorter (e.g. Jan 31 -> Feb 28).
 	if len(rc.MonthDays) == 0 && !rc.LastDay && rc.NthWeekday == nil {
-		d := base.Day()
-		if d > dim {
-			d = dim
-		}
+		d := min(base.Day(), dim)
 		cands = append(cands, time.Date(year, month, d, 0, 0, 0, 0, loc))
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].Before(cands[j]) })
