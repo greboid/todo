@@ -1,19 +1,17 @@
-name: CI
+name: Test and Build
+
+enable-openid-connect: true
 
 on:
   workflow_dispatch:
   push:
-    branches: [master]
-    tags: ['v*']
-  pull_request:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    branches:
+      - master
+    tags:
+      - v*
 
 jobs:
   test:
-    name: Vet, build, and test
     runs-on: alpine
     steps:
       - uses: actions/toolkit/git-checkout@master
@@ -34,7 +32,16 @@ jobs:
         run: npx --yes @redocly/cli@2 lint --extends recommended-strict --format=github-actions internal/api/openapi.yaml
       - uses: actions/toolkit/go-vet@master
       - uses: actions/toolkit/go-test@master
-      - name: Build image
-        uses: actions/toolkit/docker-build@master
+  container:
+    needs: test
+    runs-on: alpine
+    steps:
+      - uses: actions/toolkit/git-checkout@master
+      - uses: actions/toolkit/docker-login@master
+        with:
+          audience: u:1:b9293ba2-f8a7-439e-a788-a9107b7e3ea4
+          ghcr: ${{ secrets.GHCR_TOKEN }}
+      - uses: actions/toolkit/docker-push@master
         with:
           file: Containerfile
+          ghcr: true
