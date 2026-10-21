@@ -8,5 +8,15 @@ jobs:
     runs-on: alpine
     steps:
       - uses: actions/toolkit/git-checkout@master
+      - uses: actions/toolkit/go-setup@master
+      - uses: actions/toolkit/node-setup@master
+        with:
+          working-dir: web
+      - name: Install SPA dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Build SPA
+        working-directory: web
+        run: pnpm build
       - uses: actions/toolkit/go-test@master
       - uses: actions/toolkit/docker-build@master
