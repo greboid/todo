@@ -31,7 +31,7 @@ importers:
         specifier: ^5.57.2
         version: 5.57.2
       swagger-ui-dist:
-        specifier: ^5.33.3
+        specifier: ^5.34.0
         version: 5.34.0
       vite:
         specifier: ^8.3.4
