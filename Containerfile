@@ -19,7 +19,7 @@ RUN mkdir -p /rootfs/data && \
     chown -R 65532:65532 /rootfs && \
     go build -o /rootfs/todo .
 
-FROM ghcr.io/greboid/dockerbase/nonroot:1.20261020.1
+FROM ghcr.io/greboid/dockerbase/nonroot:1.20261021.0
 COPY --from=builder /rootfs /
 EXPOSE 8080
 WORKDIR /data
