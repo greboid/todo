@@ -90,7 +90,7 @@ func run() error {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	slog.Info("todo listening", "addr", *addr, "driver", *driver, "db", *dsn, "api-key", *apiKey != "")
+	slog.Info("todo listening", "addr", *addr, "driver", *driver, "api-enabled", *apiKey != "")
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen: %w", err)
 	}

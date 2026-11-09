@@ -50,7 +50,11 @@ func New(ctx context.Context, driver, dsn string) (*DB, error) {
 		sqldb.SetMaxOpenConns(1) // sqlite serializes writes; keep it simple and correct
 		dl = sqlitedialect.New()
 	case "postgres", "postgresql", "pg":
-		sqldb = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+		connector, err := postgresConnector(dsn)
+		if err != nil {
+			return nil, err
+		}
+		sqldb = sql.OpenDB(connector)
 		dl = pgdialect.New()
 	default:
 		return nil, fmt.Errorf("unsupported db driver %q (want sqlite or postgres)", driver)
@@ -65,6 +69,17 @@ func New(ctx context.Context, driver, dsn string) (*DB, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// postgresConnector converts pgdriver's panic on a malformed DSN into an error,
+// as the panic value contains the DSN and any password in it.
+func postgresConnector(dsn string) (c *pgdriver.Connector, err error) {
+	defer func() {
+		if recover() != nil {
+			err = errors.New("invalid postgres connection string")
+		}
+	}()
+	return pgdriver.NewConnector(pgdriver.WithDSN(dsn)), nil
 }
 
 // Close releases the database handle.
