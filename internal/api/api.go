@@ -100,6 +100,7 @@ type Handler struct {
 	store   *db.DB
 	apiKey  string
 	sessKey []byte
+	oidc    *OIDC
 	bus     *eventBus
 	// defaultDue is an optional quick-add schedule string (same grammar as
 	// /api/schedule/parse) applied to created todos that carry no due date or
@@ -168,9 +169,9 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /api/swagger", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/swagger/", http.StatusMovedPermanently)
 	})
-	// notifyMutations sits inside the key guard so unauthorized mutation
+	// notifyMutations sits inside the auth guard so unauthorized mutation
 	// attempts never poke anyone.
-	return h.requireAPIKey(h.notifyMutations(mux))
+	return h.requireAuth(h.notifyMutations(mux))
 }
 
 // Close tears down the handler's shared infrastructure: it ends every open
@@ -193,37 +194,54 @@ func isDocsPath(path string) bool {
 		strings.HasPrefix(path, "/api/swagger/")
 }
 
-// requireAPIKey wraps next so that, when a key is configured, requests must
-// present it — either in an X-API-Key header, as the Bearer token of the
-// Authorization header, or as a valid browser session cookie (minted with
-// the SPA document; see session.go). With no key configured (the default) it
-// is a no-op and the API stays open. Key comparison is constant-time.
-func (h *Handler) requireAPIKey(next http.Handler) http.Handler {
+// requireAuth wraps next so that, when an API key or OIDC is configured,
+// requests must authenticate. Accepted credentials:
+//
+//   - the API key in an X-API-Key header (API key configured);
+//   - a Bearer token in the Authorization header that is either the API key
+//     or a valid OIDC access token (whichever are configured; with both, a
+//     token passes if it matches either);
+//   - a valid browser session cookie (minted with the SPA document in
+//     API-key mode, or by a completed login with OIDC; see session.go).
+//
+// A presented credential that fails is rejected even if a session cookie
+// would pass. With neither configured (the default) it is a no-op and the
+// API stays open. Key comparison is constant-time.
+func (h *Handler) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.apiKey == "" || isDocsPath(r.URL.Path) {
+		if (h.apiKey == "" && h.oidc == nil) || isDocsPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		presented := r.Header.Get("X-API-Key")
-		if presented == "" {
-			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-				presented = strings.TrimPrefix(auth, "Bearer ")
-			}
-		}
-		if presented != "" {
-			if subtle.ConstantTimeCompare([]byte(presented), []byte(h.apiKey)) == 1 {
-				next.ServeHTTP(w, r)
-				return
-			}
-		} else if h.validSession(r) {
-			// Sliding expiration: re-mint so active tabs outlive sessionTTL.
-			h.MintSession(w, r)
+		if h.authenticated(w, r) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		w.Header().Set("WWW-Authenticate", `Bearer realm="todo api"`)
-		writeErr(w, http.StatusUnauthorized, errors.New("missing or invalid API key"))
+		writeErr(w, http.StatusUnauthorized, errors.New("missing or invalid credentials"))
 	})
+}
+
+// authenticated applies requireAuth's rules to one request, refreshing the
+// session cookie when that is what passed.
+func (h *Handler) authenticated(w http.ResponseWriter, r *http.Request) bool {
+	if key := r.Header.Get("X-API-Key"); key != "" {
+		return h.matchesAPIKey(key)
+	}
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		token := strings.TrimPrefix(auth, "Bearer ")
+		return h.matchesAPIKey(token) || h.validAccessToken(r, token)
+	}
+	if h.validSession(r) {
+		// Sliding expiration: re-mint so active tabs outlive sessionTTL.
+		h.MintSession(w, r)
+		return true
+	}
+	return false
+}
+
+func (h *Handler) matchesAPIKey(presented string) bool {
+	return h.apiKey != "" && subtle.ConstantTimeCompare([]byte(presented), []byte(h.apiKey)) == 1
 }
 
 func (h *Handler) listTodos(w http.ResponseWriter, r *http.Request) {
@@ -716,12 +734,15 @@ func (h *Handler) openapiSpec(w http.ResponseWriter, r *http.Request) {
 }
 
 // swaggerUI renders the Swagger UI page at the directory root and serves the
-// embedded third-party JS/CSS for any sub-path. Serving the page mints a
-// browser session (when a key is configured) so the docs page, like the SPA
-// document, bootstraps itself: try-it-out requests carry the session cookie.
+// embedded third-party JS/CSS for any sub-path. The page is guarded like the
+// SPA document (AuthorizePage): it mints a browser session in API-key mode,
+// or sends the browser to log in first with OIDC, so try-it-out requests
+// carry the session cookie.
 func (h *Handler) swaggerUI(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimPrefix(r.URL.Path, "/api/swagger/") == "" {
-		h.MintSession(w, r)
+		if !h.AuthorizePage(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = swaggerPageTpl.Execute(w, struct{ SpecURL string }{SpecURL: "/api/openapi.yaml"})
 		return

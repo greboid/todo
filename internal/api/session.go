@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Browser sessions for the optional API-key guard.
+// Browser sessions for the optional API-key and OIDC guards.
 //
 // Non-browser clients present the API key in a header; browsers get a
 // short-lived session cookie instead, minted when the SPA document is served
@@ -20,6 +20,8 @@ import (
 // stateless — "<expiry-unix>.<hex HMAC>" — signed with a key derived from
 // (never equal to) the API key: the key itself never appears in a cookie,
 // rotating the key invalidates every session, and server restarts do not.
+// With OIDC (see oidc.go) sessions are only minted by a completed login and
+// are signed with a key derived from the configured session key instead.
 
 // sessionCookieName is the cookie browsers use in place of the API key.
 const sessionCookieName = "todo_session"
@@ -64,9 +66,9 @@ func sessionSig(key []byte, exp string) []byte {
 	return mac.Sum(nil)
 }
 
-// MintSession sets a fresh session cookie when an API key is configured; a
-// no-op otherwise. main wires it into the SPA handler so loading the UI
-// document bootstraps a session, and requireAPIKey calls it again on every
+// MintSession sets a fresh session cookie when an API key or OIDC is
+// configured; a no-op otherwise. main wires it into the SPA handler so loading the UI
+// document bootstraps a session, and requireAuth calls it again on every
 // session-authenticated request for the sliding refresh. The cookie is
 // marked Secure when the request arrived over TLS or through a reverse
 // proxy that advertises HTTPS, so plain-HTTP LAN deployments keep working
@@ -75,10 +77,16 @@ func (h *Handler) MintSession(w http.ResponseWriter, r *http.Request) {
 	if h.sessKey == nil {
 		return
 	}
+	// With OIDC the cookie covers the whole site, since page loads need it
+	// to decide whether to send the browser off to log in.
+	path := "/api"
+	if h.oidc != nil {
+		path = "/"
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    mintSessionToken(h.sessKey, time.Now()),
-		Path:     "/api",
+		Path:     path,
 		HttpOnly: true,
 		Secure:   requestIsSecure(r),
 		SameSite: http.SameSiteLaxMode,
@@ -97,14 +105,18 @@ func requestIsSecure(r *http.Request) bool {
 }
 
 // validSession reports whether the request carries an unexpired session
-// cookie. Always false when no API key is configured.
+// cookie. Always false when neither an API key nor OIDC is configured. Every
+// cookie of the name is tried: a browser can hold one per path (an /api one
+// from API-key mode next to a site-wide one from OIDC) and sends them all.
 func (h *Handler) validSession(r *http.Request) bool {
 	if h.sessKey == nil {
 		return false
 	}
-	c, err := r.Cookie(sessionCookieName)
-	if err != nil {
-		return false
+	now := time.Now()
+	for _, c := range r.CookiesNamed(sessionCookieName) {
+		if validSessionToken(h.sessKey, c.Value, now) {
+			return true
+		}
 	}
-	return validSessionToken(h.sessKey, c.Value, time.Now())
+	return false
 }

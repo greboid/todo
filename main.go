@@ -37,6 +37,11 @@ func run() error {
 	addr := flag.String("addr", ":8080", "address the HTTP server listens on")
 	driver := flag.String("db-driver", "sqlite", "database backend: sqlite (also sqlite3) or postgres (also pg/postgresql)")
 	dsn := flag.String("db", "todo.db", "for SQLite, the database file path; for Postgres, a libpq-style connection string")
+	oidcIssuer := flag.String("oidc-issuer", "", "OpenID Connect issuer URL; setting it turns on OIDC login for browsers and access-token checks for API clients (needs -oidc-client-id, -oidc-client-secret, -oidc-session-key and -oidc-audience)")
+	oidcClientID := flag.String("oidc-client-id", "", "OpenID Connect client ID for browser logins")
+	oidcClientSecret := flag.String("oidc-client-secret", "", "OpenID Connect client secret for browser logins")
+	oidcSessionKey := flag.String("oidc-session-key", "", "secret that signs browser session cookies when OIDC is on; changing it logs every browser out")
+	oidcAudience := flag.String("oidc-audience", "", "audience API access tokens must carry in their aud claim, e.g. the instance's URL")
 	defaultDue := flag.String("default-due", "", "default due/repeating schedule applied to new todos without their own, in the quick-add date grammar (e.g. \"tomorrow\", \"every monday\", \"in 3 days\"); empty means no due date")
 	envflag.Parse(envflag.WithPrefix("TODO_"))
 	_ = slogflags.Logger(slogflags.WithSetDefault(true))
@@ -60,6 +65,20 @@ func run() error {
 
 	mux := http.NewServeMux()
 	handler := api.New(store, *apiKey).WithDefaultDue(*defaultDue)
+	if *oidcIssuer != "" || *oidcClientID != "" || *oidcClientSecret != "" || *oidcSessionKey != "" || *oidcAudience != "" {
+		auth, err := api.NewOIDC(ctx, api.OIDCConfig{
+			Issuer:       *oidcIssuer,
+			ClientID:     *oidcClientID,
+			ClientSecret: *oidcClientSecret,
+			SessionKey:   *oidcSessionKey,
+			Audience:     *oidcAudience,
+		})
+		if err != nil {
+			return fmt.Errorf("oidc: %w", err)
+		}
+		handler.WithOIDC(auth)
+		mux.HandleFunc("GET /auth/callback", handler.Callback)
+	}
 	// /api reads are never cached by the browser: the service worker keeps
 	// its own "last good sync" copy, and an intervening HTTP-cache entry
 	// would shadow it. The worker, manifest, and document are revalidated
@@ -67,7 +86,7 @@ func run() error {
 	mux.Handle("/api/", noStore(handler.Routes()))
 	mux.HandleFunc("GET /sw.js", serveArtifact(ui.FS(), "sw.js", "application/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /manifest.webmanifest", serveArtifact(ui.FS(), "manifest.webmanifest", "application/manifest+json; charset=utf-8"))
-	mux.Handle("/", spaHandler(ui.FS(), handler.MintSession))
+	mux.Handle("/", spaHandler(ui.FS(), handler.AuthorizePage))
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -90,7 +109,7 @@ func run() error {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	slog.Info("todo listening", "addr", *addr, "driver", *driver, "api-enabled", *apiKey != "")
+	slog.Info("todo listening", "addr", *addr, "driver", *driver, "api-enabled", *apiKey != "", "oidc-enabled", handler.OIDCEnabled())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -123,10 +142,12 @@ func serveArtifact(root fs.FS, name, contentType string) http.HandlerFunc {
 }
 
 // spaHandler serves static assets from root. Unknown GET paths fall back to
-// index.html so client-side routing works. Serving the document mints a
-// browser session via mintSession (when an API key is configured), so the
-// SPA can call the guarded API without ever knowing the key.
-func spaHandler(root fs.FS, mintSession func(http.ResponseWriter, *http.Request)) http.Handler {
+// index.html so client-side routing works. The document is guarded by
+// authorize: in API-key mode it mints a browser session so the SPA can call
+// the guarded API without ever knowing the key; with OIDC it sends browsers
+// without a session off to log in. Static assets stay public: they are the
+// same for everyone and carry no data.
+func spaHandler(root fs.FS, authorize func(http.ResponseWriter, *http.Request) bool) http.Handler {
 	files := http.FileServerFS(root)
 	index, err := fs.ReadFile(root, "index.html")
 	if err != nil {
@@ -145,8 +166,8 @@ func spaHandler(root fs.FS, mintSession func(http.ResponseWriter, *http.Request)
 			}
 		}
 		// Not a real file: serve index.html for client-side routing.
-		if mintSession != nil {
-			mintSession(w, r)
+		if authorize != nil && !authorize(w, r) {
+			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")

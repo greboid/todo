@@ -54,7 +54,7 @@ func TestRequireAPIKeySession(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	guarded := h.requireAPIKey(ok)
+	guarded := h.requireAuth(ok)
 
 	cookieValue := func(rec *httptest.ResponseRecorder) string {
 		v := rec.Header().Get("Set-Cookie")
@@ -110,7 +110,7 @@ func TestRequireAPIKeySession(t *testing.T) {
 		t.Errorf("raw API key: status = %d, want 200", rec.Code)
 	}
 
-	open := New(nil, "").requireAPIKey(ok)
+	open := New(nil, "").requireAuth(ok)
 	rec = httptest.NewRecorder()
 	open.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/todos", nil))
 	if rec.Code != http.StatusOK {
@@ -196,7 +196,7 @@ func TestDocsBypassAPIKeyAndMintSession(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/todos", nil)
 	req.Header.Set("Cookie", strings.Split(docsCookie, ";")[0])
 	rec := httptest.NewRecorder()
-	h.requireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
