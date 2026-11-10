@@ -67,8 +67,9 @@ Equivalent Compose files for both storage backends — save either one as
 `compose.yaml` and run `docker compose up -d` (or `podman compose up -d`).
 
 > **Warning**
-> The app has **no authentication**, so it must never be exposed to a public
-> interface. Both files below bind the port to loopback (`127.0.0.1`) only:
+> Out of the box the app has **no authentication** (see
+> [Authentication](#authentication) for the options), so it must never be
+> exposed to a public interface. Both files below bind the port to loopback (`127.0.0.1`) only:
 > run a reverse proxy on the same host and forward it to
 > <http://127.0.0.1:8080>. Whatever the proxy is (nginx, Caddy, Traefik, ...),
 > let it own TLS and put some access control in front (basic auth, client
@@ -158,6 +159,11 @@ command-line argument wins when both are given:
 | `-db-driver` | `TODO_DB_DRIVER` | `sqlite` | Database backend: `sqlite` (also `sqlite3`) or `postgres` (also `pg`/`postgresql`) |
 | `-db` | `TODO_DB` | `todo.db` | For SQLite, the database file path; for Postgres, a libpq-style connection string |
 | `-api-key` | `TODO_API_KEY` | _(empty)_ | Optional API key guarding `/api`; requests must send it as an `X-API-Key` header or a Bearer token, while browsers get a session cookie instead (empty disables authentication) |
+| `-oidc-issuer` | `TODO_OIDC_ISSUER` | _(empty)_ | OpenID Connect issuer URL; setting it turns on OIDC (see [Authentication](#authentication)) |
+| `-oidc-client-id` | `TODO_OIDC_CLIENT_ID` | _(empty)_ | OIDC client ID, used for browser logins |
+| `-oidc-client-secret` | `TODO_OIDC_CLIENT_SECRET` | _(empty)_ | OIDC client secret, used for browser logins |
+| `-oidc-session-key` | `TODO_OIDC_SESSION_KEY` | _(empty)_ | Secret that signs browser session cookies when OIDC is on; changing it logs every browser out |
+| `-oidc-audience` | `TODO_OIDC_AUDIENCE` | _(empty)_ | Audience API access tokens must carry in their `aud` claim, e.g. the instance's URL |
 | `-default-due` | `TODO_DEFAULT_DUE` | _(empty)_ | Default due/repeating schedule for new todos without one of their own, in the quick-add date grammar (e.g. `"tomorrow"`, `"every monday"`, `"in 3 days"`); empty means no due date |
 
 An invalid `-default-due` value prevents startup. When set, the value is
@@ -169,6 +175,38 @@ any client (web UI or API) get the default; one that already carries a
 is left alone. To deliberately skip the default, end the quick-add line with
 the keyword `never` (`buy milk never`) or send `noSchedule: true` on the API
 call; the todo is then created with no due date.
+
+### Authentication
+
+With no authentication configured, the API and UI are open to anyone who can
+reach the server. There are two optional mechanisms, which can be used alone
+or together:
+
+- **API key** (`-api-key`): API clients send the key as an `X-API-Key` header
+  or as `Authorization: Bearer <key>`. Browsers get a session cookie when they
+  load the UI, so this protects the API from other clients but not the UI
+  itself from anyone who can load the page.
+- **OpenID Connect** (`-oidc-issuer`, `-oidc-client-id`,
+  `-oidc-client-secret`, `-oidc-session-key` and `-oidc-audience`, all
+  required): browsers log
+  in at the provider (authorization code flow with PKCE) and get a session
+  cookie; loading the UI without one redirects to the provider, and API
+  requests without credentials get a 401. API clients send a JWT access token
+  from the provider as `Authorization: Bearer <token>`; it must be signed by
+  the issuer, unexpired, and carry the audience in its `aud` claim
+  (`-oidc-audience`, e.g. the instance's URL such as
+  `https://todo.example.com`). Static assets such as scripts and icons stay
+  public, since they contain no data.
+
+When both are configured, a bearer token is accepted if it matches either the
+API key or is a valid access token.
+
+To set up OIDC, register a client with your provider using
+`https://<your-host>/auth/callback` as the redirect URI, and pick a long
+random session key (e.g. `openssl rand -hex 32`). The provider is contacted
+once at startup to discover its endpoints, so it must be reachable then. Any
+user the provider lets log in to the client gets full access, so restrict
+who can use the client at the provider.
 
 ### SQLite (default)
 

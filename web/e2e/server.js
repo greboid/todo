@@ -4,7 +4,8 @@
 // the binary path comes from E2E_BIN (built once by global-setup). A Server
 // constructed without an explicit dbPath owns its temp directory and removes
 // it on stop; one constructed with a shared dbPath (the "other client" in
-// reconnect tests) never deletes it.
+// reconnect tests) never deletes it. Extra environment (e.g. OIDC settings)
+// can be passed as env, and changed between restarts.
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -15,9 +16,10 @@ import { boards, createBoard } from './helpers.js';
 const root = path.resolve(import.meta.dirname, '../..');
 
 export class Server {
-  constructor({ port, dbPath = null, apiKey = '' }) {
+  constructor({ port, dbPath = null, apiKey = '', env = {} }) {
     this.port = port;
     this.apiKey = apiKey;
+    this.env = env;
     this.ownsDb = dbPath == null;
     if (this.ownsDb) {
       this.tmp = mkdtempSync(path.join(tmpdir(), 'todo-e2e-'));
@@ -34,7 +36,7 @@ export class Server {
     this.proc = spawn(process.env.E2E_BIN, this.apiKey ? ['-api-key', this.apiKey] : [], {
       cwd: root,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, TODO_ADDR: `127.0.0.1:${this.port}`, TODO_DB: this.dbPath, TODO_DB_DRIVER: 'sqlite' },
+      env: { ...process.env, ...this.env, TODO_ADDR: `127.0.0.1:${this.port}`, TODO_DB: this.dbPath, TODO_DB_DRIVER: 'sqlite' },
     });
     this.exited = once(this.proc, 'exit').then(() => {});
     const deadline = Date.now() + 15000;

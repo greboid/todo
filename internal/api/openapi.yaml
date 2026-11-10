@@ -18,11 +18,14 @@ info:
     serialized as `[]`. Request bodies are capped at 1 MiB.
 
     Authentication is optional: when the server is started with the
-    `-api-key` flag, requests must authenticate (see ApiKeyAuth); without the
-    flag the API is open. Browsers are handled specially: loading the SPA
-    document mints a short-lived `todo_session` cookie (HttpOnly, sliding
-    expiry, re-issued on every authenticated request) that is accepted in
-    place of the key, so the UI works without ever seeing it.
+    `-api-key` flag, OpenID Connect (`-oidc-issuer` and friends), or both,
+    requests must authenticate (see ApiKeyAuth and BearerAuth); with neither
+    the API is open. Browsers are handled specially: they hold a short-lived
+    `todo_session` cookie (HttpOnly, sliding expiry, re-issued on every
+    authenticated request) that is accepted in place of a key or token. With
+    only an API key, loading the SPA document mints the cookie, so the UI
+    works without ever seeing the key; with OIDC, the cookie is only issued
+    after logging in at the provider.
 servers:
   - url: /
     description: Relative to the server host (default listen address :8080).
@@ -44,6 +47,7 @@ tags:
 
 security:
   - ApiKeyAuth: []
+  - BearerAuth: []
 
 paths:
   /api/todos:
@@ -657,7 +661,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Unauthorized:
-      description: Missing or invalid API key (only when the server runs with `-api-key`).
+      description: Missing or invalid credentials (only when the server runs with `-api-key` or OIDC).
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -673,6 +677,16 @@ components:
         sent as `Authorization: Bearer <key>`. Browsers don't use this scheme:
         they hold a short-lived `todo_session` cookie (see the description
         above), which the guard accepts interchangeably.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        `Authorization: Bearer <token>`, where the token is either the API key
+        (when `-api-key` is set) or, when OIDC is configured, a JWT access
+        token from the `-oidc-issuer` provider: signed with one of the
+        issuer's published keys, unexpired, and with `-oidc-audience` in its
+        `aud` claim (e.g. the instance's URL, `https://todo.example.com`). When both are configured, either is
+        accepted.
 
   schemas:
     Error:
