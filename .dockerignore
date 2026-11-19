@@ -1,0 +1,9 @@
+.actions
+.pnpm-store
+.git
+web/node_modules
+web/dist
+web/test-results
+internal/ui/dist
+internal/api/swagger-ui
+*.db
