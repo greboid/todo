@@ -105,6 +105,11 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, errors.New("streaming unsupported"))
 		return
 	}
+	// Subscribe before the preamble so a client that has seen ": connected"
+	// cannot miss a poke.
+	ch := h.bus.subscribe()
+	defer h.bus.unsubscribe(ch)
+
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	// Disable proxy buffering (nginx and friends) so events are flushed, not held.
@@ -113,9 +118,6 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "retry: %d\n\n", eventRetryMs)
 	fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
-
-	ch := h.bus.subscribe()
-	defer h.bus.unsubscribe(ch)
 
 	ticker := time.NewTicker(eventHeartbeat)
 	defer ticker.Stop()
